@@ -1,0 +1,165 @@
+================================================================================
+         HALEHOUND-CYD v2.5.0 - READY TO FLASH
+================================================================================
+
+This package contains pre-compiled firmware ready to flash directly to your
+ESP32-2432S028 "Cheap Yellow Display" (CYD 2.8"). No compilation required!
+
+================================================================================
+                           INCLUDED FILES
+================================================================================
+
+  HaleHound-CYD.bin  - Main firmware (2.1MB)
+  bootloader.bin     - ESP32 bootloader
+  partitions.bin     - Partition table (huge_app scheme)
+  boot_app0.bin      - Boot application
+
+================================================================================
+                   OPTION 1: ESP WEB FLASHER (EASIEST)
+================================================================================
+
+No software install needed! Works in Chrome, Edge, or Opera.
+
+1. Go to: https://esp.huhn.me/
+2. Connect your CYD to your computer via USB
+3. Click "Connect" and select your COM/serial port
+   - Windows: COM3, COM4, etc.
+   - Mac: /dev/cu.usbserial-XXXX or /dev/cu.wchusbserial-XXXX
+   - Linux: /dev/ttyUSB0, /dev/ttyACM0, etc.
+4. Add these files with their addresses:
+
+   Address      File
+   -------      ----
+   0x1000       bootloader.bin
+   0x8000       partitions.bin
+   0xe000       boot_app0.bin
+   0x10000      HaleHound-CYD.bin
+
+5. Click "Program"
+6. Wait for completion — device will reboot automatically
+7. You should see the HaleHound splash screen!
+
+================================================================================
+                   OPTION 2: ESPTOOL (COMMAND LINE)
+================================================================================
+
+WINDOWS:
+--------
+1. Install Python: https://www.python.org/downloads/
+2. Install esptool: pip install esptool
+3. Find your COM port (Device Manager > Ports)
+4. Run this command (replace COM3 with your port):
+
+   esptool.py --chip esp32 --port COM3 --baud 921600 write_flash ^
+     0x1000 bootloader.bin ^
+     0x8000 partitions.bin ^
+     0xe000 boot_app0.bin ^
+     0x10000 HaleHound-CYD.bin
+
+MAC:
+----
+1. Install esptool: pip3 install esptool
+2. Find your port: ls /dev/cu.*
+3. Run this command (replace port as needed):
+
+   esptool.py --chip esp32 --port /dev/cu.usbserial-0001 --baud 921600 \
+     write_flash \
+     0x1000 bootloader.bin \
+     0x8000 partitions.bin \
+     0xe000 boot_app0.bin \
+     0x10000 HaleHound-CYD.bin
+
+LINUX:
+------
+1. Install esptool: pip3 install esptool
+2. Find your port: ls /dev/ttyUSB*
+3. Run this command (replace port as needed):
+
+   esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+     write_flash \
+     0x1000 bootloader.bin \
+     0x8000 partitions.bin \
+     0xe000 boot_app0.bin \
+     0x10000 HaleHound-CYD.bin
+
+================================================================================
+                         TROUBLESHOOTING
+================================================================================
+
+"Failed to connect":
+  - Hold the BOOT button on the CYD while clicking Connect/Program
+  - Try a different USB cable (must be a DATA cable, not charge-only)
+  - Check that CH340 drivers are installed
+    Windows: https://www.wch-ic.com/downloads/CH341SER_EXE.html
+    Mac: https://www.wch-ic.com/downloads/CH34XSER_MAC_ZIP.html
+
+"Wrong chip":
+  - Make sure you select ESP32 (not ESP8266, ESP32-S2, or ESP32-S3)
+  - The CYD 2.8" uses a standard ESP32-WROOM-32
+
+"Timeout":
+  - Reduce baud rate to 115200 instead of 921600
+  - Hold BOOT button during the entire flash process
+  - Try unplugging and replugging the USB cable
+
+After flashing:
+  - Press the RST button or unplug/replug USB
+  - The HaleHound splash screen should appear
+  - Touch the screen to navigate menus
+  - If touch doesn't work, go to Tools > Touch Calibrate
+
+Display is dim or off:
+  - Go to Settings > Brightness and increase it
+  - The CYD backlight is on GPIO 21 (PWM controlled)
+
+Touch is inaccurate:
+  - Go to Tools > Touch Calibrate
+  - Follow the on-screen instructions to tap the corners
+  - Each CYD unit may need slightly different calibration
+
+================================================================================
+                         SUPPORTED BOARDS
+================================================================================
+
+FULLY TESTED:
+  - ESP32-2432S028 (CYD 2.8") — both Micro-USB and USB-C variants
+  - Also known as: "Cheap Yellow Display", "CYD 2.8"
+
+PIN DEFINES READY (UNTESTED):
+  - ESP32-3248S035 (CYD 3.5") — change board define in cyd_config.h
+
+NOT COMPATIBLE:
+  - ESP32-S2 or ESP32-S3 based boards (different chip)
+  - ESP8266 boards
+  - CYD boards with capacitive touch (this firmware uses resistive XPT2046)
+
+================================================================================
+                          FLASH ADDRESSES
+================================================================================
+
+Address    Size       Description
+-------    ----       -----------
+0x1000     18KB       Bootloader
+0x8000     3KB        Partition Table
+0xe000     8KB        Boot App
+0x10000    2.1MB      Main Firmware (HaleHound-CYD)
+
+Total: ~2.1MB of 4MB flash used
+
+================================================================================
+                EXTERNAL HARDWARE (OPTIONAL BUT RECOMMENDED)
+================================================================================
+
+The CYD itself works standalone for WiFi and Bluetooth attacks. For full
+functionality, wire up external radios:
+
+  CC1101 SubGHz Radio — for signal replay, jamming, brute force
+  NRF24L01+PA+LNA    — for 2.4GHz spectrum analysis, WLAN jamming
+  GT-U7 GPS Module   — for wardriving with location logging
+
+Full wiring diagrams are in the README.md file.
+
+================================================================================
+    HaleHound-CYD v2.5.0 — By JesseCHale
+    https://github.com/JesseCHale/HaleHound-CYD
+================================================================================
