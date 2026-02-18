@@ -299,6 +299,7 @@ HALEHOUND-CYD v2.5.0
 ├── Settings ──────────────────────────────────────────────
 │   ├── Brightness ............. Backlight PWM control
 │   ├── Screen Timeout ......... 30s / 1m / 2m / 5m / 10m / Never
+│   ├── Swap Colors ............ BGR / RGB panel toggle
 │   ├── Device Info ............ Hardware stats (+ Easter Egg)
 │   └── Back to Main Menu
 │
@@ -622,14 +623,11 @@ Flash a new firmware `.bin` file directly from the SD card without a computer. B
 
 #### Touch Calibrate
 
-Interactive touchscreen calibration tool. Tap the four corners of the screen to recalibrate the raw touch-to-screen coordinate mapping.
+Interactive 4-corner touchscreen calibration tool. Tap crosshairs at each corner of the screen to compute the raw touch-to-screen coordinate mapping for your specific board. Takes 5-sample averages at each point for accuracy.
 
-**Calibration Values (CYD 2.8", Rotation 0):**
-```cpp
-// Raw touch X and Y are SWAPPED on this board!
-int screenX = map(p.y, 3780, 350, 0, 239);   // rawY → screenX (inverted)
-int screenY = map(p.x, 150, 3700, 0, 319);   // rawX → screenY
-```
+**Auto-calibration:** On first boot after flashing (or after an EEPROM reset), the firmware automatically runs touch calibration before showing the main menu. This ensures every board gets a working touch mapping immediately — no need to navigate menus with broken touch.
+
+**EEPROM persistence:** Calibration values are saved to EEPROM and survive power cycles. Recalibrate anytime from Tools > Touch Calibrate. Press BOOT button to cancel calibration.
 
 #### GPS
 
@@ -646,6 +644,10 @@ Backlight PWM control with DARKER/BRIGHTER touch buttons. Range: 10-255. Saved t
 #### Screen Timeout
 
 Auto-dim after inactivity. Options: 30 sec, 1 min, 2 min, 5 min, 10 min, Never. Touch or BOOT button to wake. Saved to EEPROM.
+
+#### Swap Colors
+
+Toggle between BGR (default) and RGB color order for the ILI9341 display. Some CYD board batches have panels wired with swapped color channels, causing reds to appear blue and vice versa. This setting writes the MADCTL register directly and is saved to EEPROM.
 
 #### Device Info
 
@@ -944,7 +946,7 @@ Three devices share the VSPI bus (GPIO 18/19/23). The `spi_manager` module handl
 | Python 3.14 breaks PlatformIO build | Platform bug | Patch `platform.py` or use Python 3.10-3.13 |
 | NRF24+PA+LNA random resets | Power issue | Add 10uF capacitor between VCC/GND at module |
 | CYD boards have different LCD panel orientations | Hardware variance | Flash the matching rotation variant (Standard, 180, 90CW, or 90CCW) |
-| Touch may need recalibration per-unit | Hardware variance | Use Tools → Touch Calibrate |
+| Touch mapping varies between CYD boards | Hardware variance | Auto-calibrates on first boot; recalibrate via Tools → Touch Calibrate |
 | 3.5" CYD board untested | Pending | Pin defines ready in cyd_config.h, needs validation |
 
 ---
@@ -1019,7 +1021,7 @@ Managed by PlatformIO (`lib_deps` in `platformio.ini`):
 
 Based on the ESP32-DIV project. HaleHound Edition includes 8 new features, 17 bug fixes, hardware pin corrections (CC1101 TX/RX swap fix), full touchscreen support, SIGINT suite, and the CYD hardware port.
 
-GitHub: [github.com/JesseCHale/ESP32-DIV](https://github.com/JesseCHale/ESP32-DIV)
+GitHub: [github.com/JesseCHale/HaleHound-CYD](https://github.com/JesseCHale/HaleHound-CYD)
 
 ---
 
