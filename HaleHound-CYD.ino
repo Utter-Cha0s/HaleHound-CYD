@@ -211,11 +211,12 @@ const unsigned char *tools_submenu_icons[tools_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_go_back
 };
 
-// Settings Submenu - 4 items
-const int settings_NUM_SUBMENU_ITEMS = 4;
+// Settings Submenu - 5 items
+const int settings_NUM_SUBMENU_ITEMS = 5;
 const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
     "Brightness",
     "Screen Timeout",
+    "Swap Colors",
     "Device Info",
     "Back to Main Menu"
 };
@@ -223,6 +224,7 @@ const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
 const unsigned char *settings_submenu_icons[settings_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_eye2,
+    bitmap_icon_led,
     bitmap_icon_stat,
     bitmap_icon_go_back
 };
@@ -246,6 +248,7 @@ const unsigned char **active_submenu_icons = nullptr;
 int brightness_level = 255;
 int screen_timeout_seconds = 60;
 bool screen_asleep = false;
+bool color_order_rgb = false;  // false = BGR (default), true = RGB (swapped panels)
 
 // Timeout option tables
 const int timeoutOptions[] = {30, 60, 120, 300, 600, 0};
@@ -1262,6 +1265,73 @@ void screenTimeoutControlLoop() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// COLOR SWAP CONTROL (BGR / RGB panel toggle)
+// ═══════════════════════════════════════════════════════════════════════════
+
+void displayColorSwap() {
+    tft.fillScreen(TFT_BLACK);
+    drawStatusBar();
+    drawInoIconBar();
+
+    drawGlitchTitle(60, "COLORS");
+
+    // Current mode display
+    tft.drawRoundRect(20, 95, 200, 50, 6, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    if (color_order_rgb) {
+        tft.setCursor(72, 108);
+        tft.print("RGB");
+    } else {
+        tft.setCursor(52, 108);
+        tft.print("BGR *");
+    }
+
+    // Description
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(20, 160);
+    tft.print("If colors look wrong (green");
+    tft.setCursor(20, 172);
+    tft.print("instead of pink), tap SWAP.");
+    tft.setCursor(20, 192);
+    tft.print("* = default for most boards");
+
+    // Swap button
+    tft.fillRect(50, 225, 140, 45, HALEHOUND_DARK);
+    tft.drawRect(50, 225, 140, 45, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_CYAN);
+    tft.setCursor(82, 238);
+    tft.print("SWAP");
+}
+
+void colorSwapLoop() {
+    displayColorSwap();
+
+    while (!feature_exit_requested) {
+        touchButtonsUpdate();
+
+        if (isInoBackTapped() || buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+            feature_exit_requested = true;
+            saveSettings();
+            break;
+        }
+
+        // Swap button
+        if (isTouchInArea(50, 225, 140, 45)) {
+            color_order_rgb = !color_order_rgb;
+            applyColorOrder();
+            saveSettings();
+            displayColorSwap();
+            delay(300);
+        }
+
+        delay(50);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 
 void drawEggBackground() {
     tft.fillScreen(TFT_BLACK);
@@ -1568,7 +1638,7 @@ void handleSettingsSubmenuTouch() {
             displaySubmenu();
             delay(200);
 
-            if (current_submenu_index == 3) { // Back
+            if (current_submenu_index == 4) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -1583,7 +1653,10 @@ void handleSettingsSubmenuTouch() {
                 case 1: // Screen Timeout
                     screenTimeoutControlLoop();
                     break;
-                case 2: // Device Info
+                case 2: // Swap Colors
+                    colorSwapLoop();
+                    break;
+                case 3: // Device Info
                     displayDeviceInfo();
                     break;
             }
@@ -1821,7 +1894,7 @@ void setup() {
 
     // Initialize display
     tft.init();
-    tft.setRotation(0);  // Portrait mode
+    tft.setRotation(0);  // Portrait mode — keeps 240x320 coordinate space
     tft.fillScreen(HALEHOUND_BLACK);
 
     // Turn on backlight with PWM
@@ -1845,10 +1918,20 @@ void setup() {
 
     // Touch test available via runTouchTest() if needed for recalibration
 
-    // Load settings from EEPROM (brightness, timeout)
+    // Load settings from EEPROM (brightness, timeout, color order, touch cal)
     loadSettings();
     ledcWrite(0, brightness_level);
+    applyColorOrder();
     Serial.println("[INIT] Settings loaded");
+
+    // Auto-trigger touch calibration on first boot (uncalibrated board)
+    {
+        extern bool touch_calibrated;
+        if (!touch_calibrated) {
+            Serial.println("[INIT] No touch calibration found — running first-time calibration");
+            runTouchCalibration();
+        }
+    }
 
     // Print system info
     Serial.printf("[INFO] Free Heap: %d\n", ESP.getFreeHeap());

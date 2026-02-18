@@ -717,24 +717,17 @@ Passive-only modules (Packet Monitor, Probe Sniffer, Station Scanner, BLE Scanne
 
 ## SD Card Structure
 
-Insert a MicroSD card (FAT32 formatted) for payload storage and data capture.
+Insert a MicroSD card (FAT32 formatted) for data capture and OTA updates.
 
 ```
 /sd/
-├── payloads/          ← DuckyScript payloads
-│   ├── wifi_rickroll.txt
-│   └── ...
-├── subghz/            ← Saved CC1101 signal profiles
-│   ├── garage_433.json
-│   └── ...
-├── captures/          ← EAPOL/PMKID captures
+├── eapol/             ← EAPOL/PMKID captures
 │   ├── target_handshake.hc22000
 │   └── ...
 ├── wardriving/        ← GPS-tagged AP logs
 │   └── wardrive_20260215.csv
-├── firmware/           ← OTA update binaries
-│   └── halehound-cyd-v2.5.1.bin
-└── settings.json       ← Brightness, timeout preferences
+└── firmware/          ← OTA update binaries
+    └── halehound-cyd.bin
 ```
 
 ---

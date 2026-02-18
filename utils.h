@@ -119,6 +119,9 @@ void saveSettings();
 // Load settings from EEPROM
 void loadSettings();
 
+// Apply BGR/RGB color order to display
+void applyColorOrder();
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DEBUG HELPERS
 // ═══════════════════════════════════════════════════════════════════════════

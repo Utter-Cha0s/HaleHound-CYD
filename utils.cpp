@@ -320,27 +320,49 @@ String getElapsedTimeString(uint32_t startMillis) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define EEPROM_SIZE 512
-#define EEPROM_MAGIC 0xCD02
+#define EEPROM_MAGIC 0xCD04
 
 // Globals defined in HaleHound-CYD.ino
 extern int brightness_level;
 extern int screen_timeout_seconds;
+extern bool color_order_rgb;
+extern TFT_eSPI tft;
 
 struct Settings {
     uint16_t magic;
     uint8_t brightness;
     float lastFrequency;
-    uint8_t touchCalibrated;
-    uint16_t touchCalData[5];
+    uint8_t touchCalibrated;   // 0 = use defaults, 1 = use saved calibration
+    uint8_t touchXSource;      // 0 = rawX→screenX, 1 = rawY→screenX
+    uint16_t touchXMin;        // raw value that maps to screenX=0
+    uint16_t touchXMax;        // raw value that maps to screenX=239
+    uint8_t touchYSource;      // 0 = rawX→screenY, 1 = rawY→screenY
+    uint16_t touchYMin;        // raw value that maps to screenY=0
+    uint16_t touchYMax;        // raw value that maps to screenY=319
     uint16_t screenTimeout;
+    uint8_t colorSwap;         // 0 = BGR (default), 1 = RGB
 };
 
 static Settings settings;
 
 void saveSettings() {
+    extern uint8_t touch_cal_x_source;
+    extern uint16_t touch_cal_x_min, touch_cal_x_max;
+    extern uint8_t touch_cal_y_source;
+    extern uint16_t touch_cal_y_min, touch_cal_y_max;
+    extern bool touch_calibrated;
+
     settings.magic = EEPROM_MAGIC;
     settings.brightness = (uint8_t)brightness_level;
     settings.screenTimeout = (uint16_t)screen_timeout_seconds;
+    settings.colorSwap = color_order_rgb ? 1 : 0;
+    settings.touchCalibrated = touch_calibrated ? 1 : 0;
+    settings.touchXSource = touch_cal_x_source;
+    settings.touchXMin = touch_cal_x_min;
+    settings.touchXMax = touch_cal_x_max;
+    settings.touchYSource = touch_cal_y_source;
+    settings.touchYMin = touch_cal_y_min;
+    settings.touchYMax = touch_cal_y_max;
 
     EEPROM.begin(EEPROM_SIZE);
     EEPROM.put(0, settings);
@@ -348,8 +370,8 @@ void saveSettings() {
     EEPROM.end();
 
     #if CYD_DEBUG
-    Serial.printf("[UTILS] Settings saved (brightness=%d, timeout=%d)\n",
-                  settings.brightness, settings.screenTimeout);
+    Serial.printf("[UTILS] Settings saved (brightness=%d, timeout=%d, colorSwap=%d)\n",
+                  settings.brightness, settings.screenTimeout, settings.colorSwap);
     #endif
 }
 
@@ -364,7 +386,14 @@ void loadSettings() {
         settings.brightness = 255;
         settings.lastFrequency = 433.92;
         settings.touchCalibrated = 0;
+        settings.touchXSource = 1;     // rawY→screenX (Jesse's board default)
+        settings.touchXMin = 3780;     // rawY high = screenX 0 (left)
+        settings.touchXMax = 350;      // rawY low = screenX 239 (right)
+        settings.touchYSource = 0;     // rawX→screenY (Jesse's board default)
+        settings.touchYMin = 150;      // rawX low = screenY 0 (top)
+        settings.touchYMax = 3700;     // rawX high = screenY 319 (bottom)
         settings.screenTimeout = 60;
+        settings.colorSwap = 0;
 
         #if CYD_DEBUG
         Serial.println("[UTILS] No valid settings found, using defaults");
@@ -373,12 +402,45 @@ void loadSettings() {
         // Apply saved settings to globals
         brightness_level = settings.brightness;
         screen_timeout_seconds = settings.screenTimeout;
+        color_order_rgb = (settings.colorSwap == 1);
+
+        // Apply touch calibration to globals
+        extern uint8_t touch_cal_x_source;
+        extern uint16_t touch_cal_x_min, touch_cal_x_max;
+        extern uint8_t touch_cal_y_source;
+        extern uint16_t touch_cal_y_min, touch_cal_y_max;
+        extern bool touch_calibrated;
+
+        touch_calibrated = (settings.touchCalibrated == 1);
+        touch_cal_x_source = settings.touchXSource;
+        touch_cal_x_min = settings.touchXMin;
+        touch_cal_x_max = settings.touchXMax;
+        touch_cal_y_source = settings.touchYSource;
+        touch_cal_y_min = settings.touchYMin;
+        touch_cal_y_max = settings.touchYMax;
 
         #if CYD_DEBUG
-        Serial.printf("[UTILS] Settings loaded (brightness=%d, timeout=%d)\n",
-                      settings.brightness, settings.screenTimeout);
+        Serial.printf("[UTILS] Settings loaded (brightness=%d, timeout=%d, colorSwap=%d, touchCal=%d)\n",
+                      settings.brightness, settings.screenTimeout, settings.colorSwap, settings.touchCalibrated);
         #endif
     }
+}
+
+// Apply BGR/RGB color order to display via MADCTL register
+void applyColorOrder() {
+    // After setRotation(0), MADCTL is 0x48 (MX + BGR)
+    // BGR bit is bit 3 (0x08) — clear it for RGB panels
+    uint8_t madctl = 0x48;  // Default: MX + BGR
+    if (color_order_rgb) {
+        madctl = 0x40;      // MX only, no BGR = RGB mode
+    }
+    tft.writecommand(0x36);
+    tft.writedata(madctl);
+
+    #if CYD_DEBUG
+    Serial.printf("[UTILS] Color order: %s (MADCTL=0x%02X)\n",
+                  color_order_rgb ? "RGB" : "BGR", madctl);
+    #endif
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
