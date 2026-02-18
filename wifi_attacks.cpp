@@ -5090,7 +5090,7 @@ void cleanup() {
 // ═══════════════════════════════════════════════════════════════════════════
 // STATION SCANNER IMPLEMENTATION
 // Discovers WiFi clients/stations via Probe Request sniffing
-// Based on Marauder's proven approach + HaleHound patterns
+// HaleHound station discovery implementation
 // ═══════════════════════════════════════════════════════════════════════════
 
 namespace StationScan {

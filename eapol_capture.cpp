@@ -4,8 +4,7 @@
 // Outputs: hashcat .hc22000 + standard PCAP to SD card
 // Created: 2026-02-16
 //
-// PMKID extraction from EAPOL msg1 RSN IE — NO other ESP32 firmware does this.
-// Bruce, Ghost_ESP, and Marauder all just dump raw PCAP.
+// PMKID extraction from EAPOL msg1 RSN IE — on-device extraction.
 // HaleHound extracts the PMKID on-device and writes hashcat-ready .hc22000.
 // ═══════════════════════════════════════════════════════════════════════════
 

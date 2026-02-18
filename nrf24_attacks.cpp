@@ -494,7 +494,7 @@ static void scanDisplay() {
         scanner_initialized = true;
     }
 
-    // Single pass scan with exponential smoothing (Bruce-style)
+    // Single pass scan with exponential smoothing
     for (int i = 0; i < SCAN_CHANNELS && scanning && !exitRequested; ++i) {
         nrfSetChannel(i);
         nrfSetRX();  // MUST set PRIM_RX bit to actually receive! (not just CE high)

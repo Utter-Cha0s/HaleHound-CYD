@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HaleHound-CYD Karma Attack Module
 // Probe request listener + rogue AP responder
-// Based on SKOLL payload design (WiFi Pineapple Pager)
+// HaleHound Karma implementation
 // Created: 2026-02-16
 //
 // Phase 1: COLLECT — sniff probe requests, build SSID pool
