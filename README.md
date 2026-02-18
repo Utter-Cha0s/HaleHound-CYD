@@ -44,7 +44,7 @@
 
 **ESP32-DIV HaleHound Edition for Cheap Yellow Display**
 
-Version **v2.5.0 CYD Edition** | By [JesseCHale](https://github.com/JesseCHale)
+Version **v2.6.0 CYD Edition** | By [JesseCHale](https://github.com/JesseCHale)
 
 ---
 
@@ -247,7 +247,7 @@ The MicroSD slot is **built into the CYD board** on the back. No external wiring
 ## Menu Tree
 
 ```
-HALEHOUND-CYD v2.5.0
+HALEHOUND-CYD v2.6.0
 │
 ├── WiFi ──────────────────────────────────────────────────
 │   ├── Packet Monitor ......... Real-time 802.11 frame capture
@@ -300,6 +300,7 @@ HALEHOUND-CYD v2.5.0
 │   ├── Brightness ............. Backlight PWM control
 │   ├── Screen Timeout ......... 30s / 1m / 2m / 5m / 10m / Never
 │   ├── Swap Colors ............ BGR / RGB panel toggle
+│   ├── Rotation ............... Portrait orientation fix (0° / 180° / 90CW / 90CCW)
 │   ├── Device Info ............ Hardware stats (+ Easter Egg)
 │   └── Back to Main Menu
 │
@@ -649,6 +650,21 @@ Auto-dim after inactivity. Options: 30 sec, 1 min, 2 min, 5 min, 10 min, Never. 
 
 Toggle between BGR (default) and RGB color order for the ILI9341 display. Some CYD board batches have panels wired with swapped color channels, causing reds to appear blue and vice versa. This setting writes the MADCTL register directly and is saved to EEPROM.
 
+#### Rotation
+
+Different CYD manufacturers mount the LCD panel in different orientations. If your display appears upside-down or sideways after flashing, use this setting to correct it. The UI is **portrait only** (taller than wide) — this setting rotates the portrait layout to compensate for how your board's panel is physically mounted.
+
+| Option | Use When |
+|--------|----------|
+| Standard (0°) | Display is correct — most common |
+| Flipped 180° | Display is upside-down |
+| 90° CW | Panel is mounted sideways (clockwise) |
+| 90° CCW | Panel is mounted sideways (counter-clockwise) |
+
+Touch input automatically recalibrates after every rotation change. The selected rotation is saved to EEPROM and persists across power cycles.
+
+**Note:** 90° CW and 90° CCW exist only to compensate for sideways-mounted LCD panels. They are **not** a landscape mode.
+
 #### Device Info
 
 Hardware information page showing: device name, firmware version, free heap, CPU frequency, flash size, and board type.
@@ -738,40 +754,36 @@ Insert a MicroSD card (FAT32 formatted) for data capture and OTA updates.
 
 Pre-compiled firmware binaries are available in the `flash_package/` folder for users who don't want to build from source.
 
-### Display Rotation Variants
+### Single Binary — All Boards
 
-CYD boards ship with different LCD panel orientations depending on the manufacturer and batch. Four firmware variants are provided to cover all known panel types:
+One firmware binary works on every CYD board regardless of LCD panel orientation. No more guessing which rotation file to download.
 
-| Variant | Files | Description |
-|---------|-------|-------------|
-| **Standard** | `HaleHound-CYD-Standard` | Default rotation — USB port at bottom, portrait mode |
-| **180** | `HaleHound-CYD-180` | 180° rotated — for boards with inverted panels |
-| **90CW** | `HaleHound-CYD-90CW` | 90° clockwise — for boards with sideways panels |
-| **90CCW** | `HaleHound-CYD-90CCW` | 90° counter-clockwise — for boards with sideways panels (opposite direction) |
+| File | Flash Address | Description |
+|------|---------------|-------------|
+| `HaleHound-CYD-FULL.bin` | `0x0` | Complete image — single file, easiest method |
+| `HaleHound-CYD.bin` | `0x10000` | Firmware only — requires 3 shared boot files |
 
-**How to pick:** Flash "Standard" first. If the display is upside-down, use "180". If sideways, try "90CW" then "90CCW". The correct orientation is portrait (taller than wide) with the HaleHound logo right-side up and USB at the bottom.
+If your display is upside-down or sideways after flashing, go to **Settings > Rotation** and select the correct orientation. Touch recalibrates automatically. No reflashing needed.
 
 ### Flash Methods
 
-Each variant is available in two formats:
+Two flash methods are available. If one doesn't work, try the other.
 
-| Format | File Suffix | Flash Address | Notes |
-|--------|-------------|---------------|-------|
-| **Single File** | `-FULL.bin` | `0x0` | One file, easiest method. Works for most boards. |
-| **Four File** | `.bin` (no FULL) | `0x10000` | Requires 3 shared boot files. Works on ALL boards. |
-
-If the single-file method gives you a black screen, use the four-file method instead. Some boards have flash mode incompatibilities (DIO vs QIO) that only the four-file method handles correctly.
+| Method | Files | Notes |
+|--------|-------|-------|
+| **Single File** | `HaleHound-CYD-FULL.bin` at `0x0` | One file, works for most boards |
+| **Four File** | `bootloader.bin` + `partitions.bin` + `boot_app0.bin` + `HaleHound-CYD.bin` | Works on ALL boards including DIO/QIO incompatible ones |
 
 ### Flash with ESP Web Flasher (No Install)
 
 1. Open [esp.huhn.me](https://esp.huhn.me) in **Chrome**, **Edge**, or **Opera** (Firefox/Safari not supported)
 2. Click **Connect** and select your CYD's serial port
-3. **Single file method:** Set address `0x0`, select your `*-FULL.bin` file
+3. **Single file method:** Set address `0x0`, select `HaleHound-CYD-FULL.bin`
 4. **Four file method:** Add all four entries:
    - `0x1000` → `bootloader.bin`
    - `0x8000` → `partitions.bin`
    - `0xe000` → `boot_app0.bin`
-   - `0x10000` → Your rotation variant `.bin`
+   - `0x10000` → `HaleHound-CYD.bin`
 5. Click **Program** and wait for completion
 6. Power cycle the CYD (unplug and replug USB)
 
@@ -779,15 +791,19 @@ If the single-file method gives you a black screen, use the four-file method ins
 
 ```bash
 # Single file method
-esptool.py --chip esp32 --baud 115200 write_flash 0x0 HaleHound-CYD-Standard-FULL.bin
+esptool.py --chip esp32 --baud 115200 write_flash 0x0 HaleHound-CYD-FULL.bin
 
 # Four file method
 esptool.py --chip esp32 --baud 115200 write_flash \
   0x1000 bootloader.bin \
   0x8000 partitions.bin \
   0xe000 boot_app0.bin \
-  0x10000 HaleHound-CYD-Standard.bin
+  0x10000 HaleHound-CYD.bin
 ```
+
+### First Boot
+
+On first boot (or after flashing), the firmware automatically runs touch calibration — tap the 4 corner crosshairs when prompted. If your display orientation is wrong, navigate to **Settings > Rotation** to fix it. The UI is portrait only.
 
 ### CH340 USB Driver
 
@@ -801,8 +817,8 @@ CYD boards use the CH340 USB-to-serial chip. Install the driver if your computer
 | Problem | Solution |
 |---------|----------|
 | Black screen after single-file flash | Use the four-file method instead |
-| Display sideways or upside-down | Flash a different rotation variant |
-| Touch backwards or offset | Use the matching rotation variant, or try Tools → Touch Calibrate |
+| Display sideways or upside-down | Go to Settings > Rotation and select the correct orientation |
+| Touch backwards or offset | Change rotation in Settings, or use Tools > Touch Calibrate |
 | "Failed to connect" error | Hold BOOT button while clicking Program |
 | Browser doesn't show serial port | Use Chrome/Edge/Opera and install CH340 driver |
 | Flashing completes but won't boot | Erase flash first: `esptool.py --chip esp32 erase_flash` then reflash |
@@ -945,7 +961,7 @@ Three devices share the VSPI bus (GPIO 18/19/23). The `spi_manager` module handl
 | Speaker unavailable | By design | GPIO 26 repurposed for serial monitor RX |
 | Python 3.14 breaks PlatformIO build | Platform bug | Patch `platform.py` or use Python 3.10-3.13 |
 | NRF24+PA+LNA random resets | Power issue | Add 10uF capacitor between VCC/GND at module |
-| CYD boards have different LCD panel orientations | Hardware variance | Flash the matching rotation variant (Standard, 180, 90CW, or 90CCW) |
+| CYD boards have different LCD panel orientations | Hardware variance | Use Settings > Rotation to select the correct portrait orientation |
 | Touch mapping varies between CYD boards | Hardware variance | Auto-calibrates on first boot; recalibrate via Tools → Touch Calibrate |
 | 3.5" CYD board untested | Pending | Pin defines ready in cyd_config.h, needs validation |
 

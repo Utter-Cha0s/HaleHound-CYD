@@ -1,6 +1,6 @@
 ================================================================================
               HALEHOUND-CYD FLASH INSTRUCTIONS
-              v2.5.0 CYD Edition
+              v2.6.0 CYD Edition
 ================================================================================
 
   Repository:   https://github.com/JesseCHale/HaleHound-CYD
@@ -10,93 +10,83 @@
 
 
 ================================================================================
-  STEP 1: IDENTIFY YOUR DISPLAY ROTATION
+  ABOUT THIS FIRMWARE
 ================================================================================
 
-CYD boards use different LCD panels with different default orientations.
-You MUST flash the correct rotation variant for your specific board.
+This is a SINGLE firmware binary. One file, all boards. No more
+guessing which rotation variant to download.
 
-HOW TO IDENTIFY:
-  1. Flash the "Standard" variant first
-  2. If the display is correct (portrait, USB port at BOTTOM), you're done
-  3. If the display is wrong, identify the issue:
+The UI is PORTRAIT orientation (taller than wide). Different CYD
+manufacturers mount the LCD panel in different directions, so the
+display may appear upside-down or sideways on first boot. This is
+normal -- it does NOT mean your board is broken.
 
-  SYMPTOM                          → USE THIS VARIANT
-  ─────────────────────────────────────────────────────
-  Display is correct               → Standard
-  Display is upside-down (180°)    → 180
-  Display is sideways (90° CW)     → 90CW
-  Display is sideways (90° CCW)    → 90CCW
+To fix it, go to Settings > Rotation and pick the one that puts
+the display right-side up in portrait:
+  - Standard (0)      Most common. USB port at bottom.
+  - Flipped 180       USB port at top.
+  - 90 CW             For boards with sideways-mounted LCD panels.
+  - 90 CCW            For boards with sideways-mounted LCD panels.
 
-  "Correct" means: portrait orientation, HaleHound logo right-side up,
-  USB port at the bottom of the device.
+Touch input automatically recalibrates when you change rotation.
+On first boot, the firmware will prompt you to calibrate touch by
+tapping 4 corner crosshairs.
 
-  NOTE: Touch input is calibrated per-variant. If touch feels off after
-  flashing, try the other 90° variant (90CW vs 90CCW).
+NOTE: 90 CW and 90 CCW exist ONLY for boards whose LCD panels are
+mounted sideways by the manufacturer. They rotate the portrait UI
+to compensate. This is NOT a landscape mode.
 
 
 ================================================================================
-  STEP 2: CHOOSE YOUR FLASH METHOD
+  CHOOSE YOUR FLASH METHOD
 ================================================================================
 
 There are TWO flash methods. If one doesn't work, try the other.
 
-──────────────────────────────────────────────────────────────────────────
-  METHOD A: SINGLE FILE (Easiest — works for most boards)
-──────────────────────────────────────────────────────────────────────────
+----------------------------------------------------------------------
+  METHOD A: SINGLE FILE (Easiest -- works for most boards)
+----------------------------------------------------------------------
 
-  Uses the *-FULL.bin file. One file, one address, done.
-
-  FILES:
-    HaleHound-CYD-Standard-FULL.bin    ← Standard rotation
-    HaleHound-CYD-180-FULL.bin         ← 180° rotation
-    HaleHound-CYD-90CW-FULL.bin        ← 90° clockwise rotation
-    HaleHound-CYD-90CCW-FULL.bin       ← 90° counter-clockwise rotation
-
+  FILE:  HaleHound-CYD-FULL.bin
   FLASH ADDRESS: 0x0
 
-  USING ESP WEB FLASHER (Browser — no install needed):
+  USING ESP WEB FLASHER (Browser -- no install needed):
     1. Open https://esp.huhn.me in Chrome, Edge, or Opera
        (Firefox and Safari do NOT support Web Serial)
     2. Click "Connect" and select your CYD's serial port
     3. Set address to: 0x0
-    4. Click "Choose File" and select your *-FULL.bin file
+    4. Click "Choose File" and select HaleHound-CYD-FULL.bin
     5. Click "Program"
     6. Wait for completion, then power cycle the CYD
 
   USING ESPTOOL (Command line):
-    esptool.py --chip esp32 --baud 115200 write_flash 0x0 HaleHound-CYD-Standard-FULL.bin
+    esptool.py --chip esp32 --baud 115200 write_flash 0x0 HaleHound-CYD-FULL.bin
 
   IF YOU GET A BLACK SCREEN: Your board may not support the single-file
   method (DIO flash mode incompatibility). Use Method B instead.
 
-──────────────────────────────────────────────────────────────────────────
-  METHOD B: FOUR FILES (Fallback — works on ALL boards)
-──────────────────────────────────────────────────────────────────────────
+----------------------------------------------------------------------
+  METHOD B: FOUR FILES (Fallback -- works on ALL boards)
+----------------------------------------------------------------------
 
   Uses the firmware .bin + three shared boot files at specific addresses.
   This method preserves the bootloader's native flash mode and works on
   boards where single-file flashing produces a black screen.
 
-  SHARED FILES (same for all rotations):
-    bootloader.bin     → address 0x1000
-    partitions.bin     → address 0x8000
-    boot_app0.bin      → address 0xe000
-
-  FIRMWARE FILES (pick ONE matching your rotation):
-    HaleHound-CYD-Standard.bin    → address 0x10000
-    HaleHound-CYD-180.bin         → address 0x10000
-    HaleHound-CYD-90CW.bin        → address 0x10000
-    HaleHound-CYD-90CCW.bin       → address 0x10000
+  FILES AND ADDRESSES:
+    bootloader.bin ......... 0x1000
+    partitions.bin ......... 0x8000
+    boot_app0.bin .......... 0xe000
+    HaleHound-CYD.bin ...... 0x10000
 
   USING ESP WEB FLASHER (Browser):
     1. Open https://esp.huhn.me in Chrome, Edge, or Opera
     2. Click "Connect" and select your CYD's serial port
     3. Add ALL FOUR files with their addresses:
-         0x1000  → bootloader.bin
-         0x8000  → partitions.bin
-         0xe000  → boot_app0.bin
-         0x10000 → HaleHound-CYD-Standard.bin  (or your rotation variant)
+         0x1000  -> bootloader.bin
+         0x8000  -> partitions.bin
+         0xe000  -> boot_app0.bin
+         0x10000 -> HaleHound-CYD.bin
     4. Click "Program"
     5. Wait for completion, then power cycle the CYD
 
@@ -105,24 +95,24 @@ There are TWO flash methods. If one doesn't work, try the other.
       0x1000 bootloader.bin \
       0x8000 partitions.bin \
       0xe000 boot_app0.bin \
-      0x10000 HaleHound-CYD-Standard.bin
+      0x10000 HaleHound-CYD.bin
 
 
 ================================================================================
-  STEP 3: VERIFY
+  FIRST BOOT
 ================================================================================
 
   After flashing:
     1. Power cycle the CYD (unplug and replug USB)
     2. You should see the HaleHound boot screen
-    3. If the display is correct and touch works, you're done
-    4. If orientation is wrong, reflash with a different rotation variant
+    3. Touch calibration will start automatically (tap the 4 crosshairs)
+    4. Once calibrated, you're at the main menu
 
-  CORRECT ORIENTATION:
-    - Portrait mode (taller than wide)
-    - HaleHound wolf logo is right-side up
-    - USB port is at the bottom
-    - Touch responds to the correct screen locations
+  IF YOUR DISPLAY IS UPSIDE-DOWN OR SIDEWAYS:
+    1. Navigate to Settings > Rotation
+    2. Select the correct orientation for your board
+    3. Touch will automatically recalibrate after rotation change
+    4. No reflashing needed!
 
 
 ================================================================================
@@ -130,7 +120,7 @@ There are TWO flash methods. If one doesn't work, try the other.
 ================================================================================
 
   PROBLEM: Black screen after flashing
-  ─────────────────────────────────────
+  -------------------------------------
     - If you used Method A (single file), try Method B (four files)
     - Erase flash first: esptool.py --chip esp32 erase_flash
     - Then reflash using Method B
@@ -138,27 +128,26 @@ There are TWO flash methods. If one doesn't work, try the other.
     - Try baud rate 115200 instead of higher speeds
 
   PROBLEM: Display is sideways or upside-down
-  ─────────────────────────────────────────────
-    - Flash a different rotation variant (Standard, 180, 90CW, or 90CCW)
-    - Start with Standard, then try 180, then 90CW, then 90CCW
-    - Your CYD board has a different LCD panel orientation than others
+  ---------------------------------------------
+    - Go to Settings > Rotation and select the correct orientation
+    - Standard = USB at bottom, Flipped 180 = USB at top
+    - 90 CW = USB on left, 90 CCW = USB on right
+    - Touch recalibrates automatically after rotation change
 
   PROBLEM: Touch is backwards or offset
-  ──────────────────────────────────────
-    - This is tied to display rotation — make sure you're using the
-      matching rotation variant
-    - If using 90CW and touch is wrong, try 90CCW (or vice versa)
-    - Use Tools → Touch Calibrate in the firmware menu
+  ---------------------------------------
+    - Go to Settings > Rotation and try a different orientation
+    - If touch is still off, power cycle and recalibrate
 
   PROBLEM: "Failed to connect" or "Timed out"
-  ─────────────────────────────────────────────
+  ---------------------------------------------
     - Hold the BOOT button on the CYD while clicking "Program"
     - Release BOOT after "Connecting..." appears
     - Try a different USB port
     - Install CH340 driver (see below)
 
   PROBLEM: Browser flasher doesn't show serial port
-  ──────────────────────────────────────────────────
+  ---------------------------------------------------
     - Use Chrome, Edge, or Opera (Firefox/Safari don't support Web Serial)
     - Install the CH340 USB driver for your OS:
         Windows: https://www.wch-ic.com/downloads/CH341SER_EXE.html
@@ -166,7 +155,7 @@ There are TWO flash methods. If one doesn't work, try the other.
         Linux:   Built into kernel 5.x+ (no install needed)
 
   PROBLEM: Flashing completes but CYD doesn't boot
-  ──────────────────────────────────────────────────
+  --------------------------------------------------
     - Unplug USB, wait 5 seconds, replug
     - If still black, erase and reflash:
         esptool.py --chip esp32 erase_flash
@@ -178,19 +167,13 @@ There are TWO flash methods. If one doesn't work, try the other.
 ================================================================================
 
   SINGLE FILE METHOD (flash to 0x0):
-    HaleHound-CYD-Standard-FULL.bin .... Default rotation (USB at bottom)
-    HaleHound-CYD-180-FULL.bin ......... 180° rotated
-    HaleHound-CYD-90CW-FULL.bin ........ 90° clockwise
-    HaleHound-CYD-90CCW-FULL.bin ....... 90° counter-clockwise
+    HaleHound-CYD-FULL.bin ......... Complete image (bootloader + firmware)
 
   FOUR FILE METHOD (flash to individual addresses):
-    bootloader.bin ...................... 0x1000 (shared)
-    partitions.bin ...................... 0x8000 (shared)
-    boot_app0.bin ....................... 0xe000 (shared)
-    HaleHound-CYD-Standard.bin ......... 0x10000 (default rotation)
-    HaleHound-CYD-180.bin .............. 0x10000 (180° rotated)
-    HaleHound-CYD-90CW.bin ............. 0x10000 (90° clockwise)
-    HaleHound-CYD-90CCW.bin ............ 0x10000 (90° counter-clockwise)
+    bootloader.bin .................. 0x1000
+    partitions.bin .................. 0x8000
+    boot_app0.bin ................... 0xe000
+    HaleHound-CYD.bin .............. 0x10000 (firmware only)
 
 
 ================================================================================

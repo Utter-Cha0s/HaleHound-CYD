@@ -48,17 +48,21 @@ uint16_t touch_cal_y_max = 3700;     // source raw value → screenY=319
 bool touch_calibrated = false;        // true if user has run calibration
 
 // Helper: map raw touch point to screenX using calibration
+// Uses tft.width() so mapping adapts to current rotation automatically
 int touchMapX(CYD28_TS_Point &p) {
     int raw = touch_cal_x_source ? p.y : p.x;
-    int val = map(raw, touch_cal_x_min, touch_cal_x_max, 0, 239);
-    return constrain(val, 0, 239);
+    int maxX = tft.width() - 1;
+    int val = map(raw, touch_cal_x_min, touch_cal_x_max, 0, maxX);
+    return constrain(val, 0, maxX);
 }
 
 // Helper: map raw touch point to screenY using calibration
+// Uses tft.height() so mapping adapts to current rotation automatically
 int touchMapY(CYD28_TS_Point &p) {
     int raw = touch_cal_y_source ? p.y : p.x;
-    int val = map(raw, touch_cal_y_min, touch_cal_y_max, 0, 319);
-    return constrain(val, 0, 319);
+    int maxY = tft.height() - 1;
+    int val = map(raw, touch_cal_y_min, touch_cal_y_max, 0, maxY);
+    return constrain(val, 0, maxY);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -129,19 +133,21 @@ void runTouchTest() {
     tft.setCursor(10, 45);
     tft.println("BOOT=exit, dots use OUR mapping");
 
-    // Draw corner markers
-    tft.fillCircle(10, 80, 5, TFT_RED);      // Top-left marker
-    tft.fillCircle(230, 80, 5, TFT_GREEN);   // Top-right marker
-    tft.fillCircle(10, 310, 5, TFT_BLUE);    // Bottom-left marker
-    tft.fillCircle(230, 310, 5, TFT_YELLOW); // Bottom-right marker
+    // Draw corner markers — positions adapt to current rotation dimensions
+    int sw = tft.width();
+    int sh = tft.height();
+    tft.fillCircle(10, 80, 5, TFT_RED);          // Top-left marker
+    tft.fillCircle(sw - 10, 80, 5, TFT_GREEN);   // Top-right marker
+    tft.fillCircle(10, sh - 10, 5, TFT_BLUE);    // Bottom-left marker
+    tft.fillCircle(sw - 10, sh - 10, 5, TFT_YELLOW); // Bottom-right marker
 
-    tft.drawRect(0, 60, 240, 260, TFT_CYAN); // Touch area box
+    tft.drawRect(0, 60, sw, sh - 60, TFT_CYAN);  // Touch area box
 
     while (digitalRead(BOOT_BUTTON) == HIGH) {
         CYD28_TS_Point p = touch.getPointRaw();
 
-        // Clear info area at very bottom
-        tft.fillRect(0, 0, 240, 55, TFT_BLACK);
+        // Clear info area at top
+        tft.fillRect(0, 0, sw, 55, TFT_BLACK);
 
         tft.setTextSize(1);
         tft.setTextColor(TFT_YELLOW);
@@ -154,8 +160,8 @@ void runTouchTest() {
             int screenY = touchMapY(p);
 
             // Clamp to screen
-            screenX = constrain(screenX, 0, 239);
-            screenY = constrain(screenY, 0, 319);
+            screenX = constrain(screenX, 0, sw - 1);
+            screenY = constrain(screenY, 0, sh - 1);
 
             tft.setTextColor(TFT_GREEN);
             tft.setCursor(5, 18);
@@ -522,7 +528,7 @@ bool isBackPressed() {
         if (p.z >= TOUCH_MIN_PRESSURE) {
             // Apply calibrated touch mapping
             int screenY = touchMapY(p);
-            if (screenY > CYD_SCREEN_HEIGHT - 40) {
+            if (screenY > tft.height() - 40) {
                 lastBackTouch = millis();
                 return true;
             }
@@ -680,10 +686,13 @@ void runTouchCalibration() {
 
     // Collect raw touch data at 4 known screen corners
     // Using inset positions so crosshairs are visible
+    // Positions adapt to current rotation dimensions
+    int calW = tft.width();
+    int calH = tft.height();
     uint16_t rawPoints[4][2];  // [corner][0=rawX, 1=rawY]
     const char* cornerNames[] = {"TOP-LEFT", "TOP-RIGHT", "BOT-LEFT", "BOT-RIGHT"};
-    int crossX[] = {20, 220, 20, 220};     // screen X positions
-    int crossY[] = {20, 20, 300, 300};     // screen Y positions
+    int crossX[] = {20, calW - 20, 20, calW - 20};   // screen X positions
+    int crossY[] = {20, 20, calH - 20, calH - 20};   // screen Y positions
 
     for (int i = 0; i < 4; i++) {
         tft.fillScreen(TFT_BLACK);
@@ -771,22 +780,28 @@ void runTouchCalibration() {
     uint8_t xSrc, ySrc;
     uint16_t xMin, xMax, yMin, yMax;
 
+    // Inset is 20px from edges, so span between crosshairs:
+    int xSpan = calW - 40;   // horizontal span (was hardcoded 200)
+    int ySpan = calH - 40;   // vertical span (was hardcoded 280)
+    int maxScreenX = calW - 1;  // max screen X coordinate (was hardcoded 239)
+    int maxScreenY = calH - 1;  // max screen Y coordinate (was hardcoded 319)
+
     if (diffRawX_horiz > diffRawY_horiz) {
         // rawX varies horizontally → rawX controls screenX
         xSrc = 0;  // rawX → screenX
         ySrc = 1;  // rawY → screenY
 
-        // TL is screenX=20, TR is screenX=220
-        // Extrapolate to 0 and 239
+        // TL is screenX=20, TR is screenX=(calW-20)
+        // Extrapolate to 0 and maxScreenX
         int rawLeft = ((int)rawPoints[0][0] + (int)rawPoints[2][0]) / 2;   // avg TL+BL rawX
         int rawRight = ((int)rawPoints[1][0] + (int)rawPoints[3][0]) / 2;  // avg TR+BR rawX
-        xMin = rawLeft + (rawLeft - rawRight) * 20 / 200;   // extrapolate to screenX=0
-        xMax = rawRight + (rawRight - rawLeft) * 19 / 200;  // extrapolate to screenX=239
+        xMin = rawLeft + (rawLeft - rawRight) * 20 / xSpan;                // extrapolate to screenX=0
+        xMax = rawRight + (rawRight - rawLeft) * (maxScreenX - (calW - 20)) / xSpan;  // to screenX=max
 
         int rawTop = ((int)rawPoints[0][1] + (int)rawPoints[1][1]) / 2;    // avg TL+TR rawY
         int rawBot = ((int)rawPoints[2][1] + (int)rawPoints[3][1]) / 2;    // avg BL+BR rawY
-        yMin = rawTop + (rawTop - rawBot) * 20 / 280;       // extrapolate to screenY=0
-        yMax = rawBot + (rawBot - rawTop) * 19 / 280;       // extrapolate to screenY=319
+        yMin = rawTop + (rawTop - rawBot) * 20 / ySpan;                    // extrapolate to screenY=0
+        yMax = rawBot + (rawBot - rawTop) * (maxScreenY - (calH - 20)) / ySpan;       // to screenY=max
     } else {
         // rawY varies horizontally → rawY controls screenX
         xSrc = 1;  // rawY → screenX
@@ -794,13 +809,13 @@ void runTouchCalibration() {
 
         int rawLeft = ((int)rawPoints[0][1] + (int)rawPoints[2][1]) / 2;   // avg TL+BL rawY
         int rawRight = ((int)rawPoints[1][1] + (int)rawPoints[3][1]) / 2;  // avg TR+BR rawY
-        xMin = rawLeft + (rawLeft - rawRight) * 20 / 200;
-        xMax = rawRight + (rawRight - rawLeft) * 19 / 200;
+        xMin = rawLeft + (rawLeft - rawRight) * 20 / xSpan;
+        xMax = rawRight + (rawRight - rawLeft) * (maxScreenX - (calW - 20)) / xSpan;
 
         int rawTop = ((int)rawPoints[0][0] + (int)rawPoints[1][0]) / 2;    // avg TL+TR rawX
         int rawBot = ((int)rawPoints[2][0] + (int)rawPoints[3][0]) / 2;    // avg BL+BR rawX
-        yMin = rawTop + (rawTop - rawBot) * 20 / 280;
-        yMax = rawBot + (rawBot - rawTop) * 19 / 280;
+        yMin = rawTop + (rawTop - rawBot) * 20 / ySpan;
+        yMax = rawBot + (rawBot - rawTop) * (maxScreenY - (calH - 20)) / ySpan;
     }
 
     // Apply to globals

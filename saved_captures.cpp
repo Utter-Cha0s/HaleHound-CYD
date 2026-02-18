@@ -38,7 +38,6 @@ namespace SavedCaptures {
 #define SC_ROW_HEIGHT       24       // Height per file row
 #define SC_VISIBLE_ROWS     ((SC_LIST_BOTTOM - SC_LIST_Y) / SC_ROW_HEIGHT)  // ~7 rows
 #define SC_BLINK_MS         500
-#define SC_SCREEN_WIDTH     240
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FILE ENTRY
@@ -125,9 +124,9 @@ static void formatSize(uint32_t bytes, char* buf, int bufLen) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawSCIconBar() {
-    tft.fillRect(0, 20, SC_SCREEN_WIDTH, 16, HALEHOUND_DARK);
+    tft.fillRect(0, 20, tft.width(), 16, HALEHOUND_DARK);
     tft.drawBitmap(10, 20, bitmap_icon_go_back, 16, 16, HALEHOUND_CYAN);
-    tft.drawLine(0, 36, SC_SCREEN_WIDTH, 36, HALEHOUND_HOTPINK);
+    tft.drawLine(0, 36, tft.width(), 36, HALEHOUND_HOTPINK);
 }
 
 static bool isSCBackTapped() {
@@ -614,7 +613,7 @@ static void drawListHeader() {
     drawStatusBar();
     drawSCIconBar();
     drawGlitchText(55, "CAPTURES", &Nosifer_Regular10pt7b);
-    tft.drawLine(0, 58, SC_SCREEN_WIDTH, 58, HALEHOUND_HOTPINK);
+    tft.drawLine(0, 58, tft.width(), 58, HALEHOUND_HOTPINK);
 
     // Column headers
     tft.setTextDatum(TL_DATUM);
@@ -694,7 +693,7 @@ static void drawFileList() {
     }
 
     // File count at bottom
-    tft.fillRect(0, SC_LIST_BOTTOM + 2, 240, 16, TFT_BLACK);
+    tft.fillRect(0, SC_LIST_BOTTOM + 2, tft.width(), 16, TFT_BLACK);
     char countBuf[32];
     snprintf(countBuf, sizeof(countBuf), "%d FILE%s", fileCount, fileCount == 1 ? "" : "S");
     tft.setTextColor(HALEHOUND_GUNMETAL);
@@ -703,7 +702,7 @@ static void drawFileList() {
     tft.setTextDatum(TL_DATUM);
 
     // Bottom bar: TAP TO VIEW
-    tft.fillRect(0, 300, 240, 20, TFT_BLACK);
+    tft.fillRect(0, tft.height() - 20, tft.width(), 20, TFT_BLACK);
     tft.setTextColor(HALEHOUND_HOTPINK);
     tft.setTextDatum(TC_DATUM);
     tft.drawString("TAP FILE TO VIEW  |  BACK TO EXIT", 120, 304);
@@ -715,7 +714,7 @@ static void drawEmptyScreen() {
     drawStatusBar();
     drawSCIconBar();
     drawGlitchText(55, "CAPTURES", &Nosifer_Regular10pt7b);
-    tft.drawLine(0, 58, SC_SCREEN_WIDTH, 58, HALEHOUND_HOTPINK);
+    tft.drawLine(0, 58, tft.width(), 58, HALEHOUND_HOTPINK);
 
     drawGlitchStatus(120, "NO FILES", HALEHOUND_HOTPINK);
     drawCenteredText(160, "No captures found in /eapol/", HALEHOUND_GUNMETAL, 1);
@@ -750,7 +749,7 @@ static void drawDetailView() {
         *dot = '\0';
     }
     drawGlitchText(55, titleBuf, &Nosifer_Regular10pt7b);
-    tft.drawLine(0, 58, SC_SCREEN_WIDTH, 58, HALEHOUND_HOTPINK);
+    tft.drawLine(0, 58, tft.width(), 58, HALEHOUND_HOTPINK);
 
     tft.setTextDatum(TC_DATUM);
     tft.setFreeFont(NULL);

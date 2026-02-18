@@ -1733,8 +1733,8 @@ void loop() {
                 drawHeader();
                 return;
             }
-            // Mode icon (x=215)
-            else if (tx >= 205 && tx <= 240) {
+            // Mode icon at right edge
+            else if (tx >= (tft.width() - 35) && tx <= tft.width()) {
                 toggleContinuousMode();
                 drawHeader();
                 return;
@@ -2803,7 +2803,8 @@ static const int frequencyCount = sizeof(frequencyListMHz) / sizeof(frequencyLis
 
 #define WF_X        2           // Left margin for drawing area
 #define WF_Y        38          // Waterfall top (below icon bar + 1px gap)
-#define WF_WIDTH    236         // Drawing width (240 - 4px margins)
+#define WF_WIDTH_MAX 316               // Max drawing width for arrays (320 - 4 for landscape)
+#define WF_WIDTH    (tft.width() - 4)  // Runtime drawing width (screen - 4px margins)
 #define WF_HEIGHT   150         // Waterfall rows of history
 
 #define SEP_Y       188         // Hot pink separator line
@@ -2827,7 +2828,7 @@ static uint8_t peakLevels[17];          // Smoothed for display (0-125)
 static unsigned int epoch = 0;          // Current write row in waterfall
 
 // Line graph (flicker-free erase/redraw)
-static int16_t prevLineY[WF_WIDTH];     // Previous frame's Y positions
+static int16_t prevLineY[WF_WIDTH_MAX]; // Previous frame's Y positions (max size for any rotation)
 static bool prevLineValid = false;       // False until first frame drawn
 
 // Heat map palette (128 pre-computed 16-bit colors)
@@ -2966,8 +2967,8 @@ static void drawWaterfallRow() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawLineGraph() {
-    int16_t newLineY[WF_WIDTH];
-    uint8_t newLevels[WF_WIDTH];  // Store display levels for color lookup
+    int16_t newLineY[WF_WIDTH_MAX];
+    uint8_t newLevels[WF_WIDTH_MAX];  // Store display levels for color lookup
 
     // Phase 1: Erase previous line (draw over in black)
     if (prevLineValid) {

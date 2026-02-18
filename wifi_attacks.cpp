@@ -843,8 +843,8 @@ void loop() {
                 }
                 drawUI();
             }
-            // Nuke icon at x=220-236
-            else if (tx >= 215 && tx <= 240) {
+            // Nuke icon at right edge
+            else if (tx >= (tft.width() - 25) && tx <= tft.width()) {
                 nukeMode();
                 // Restore screen after nuke
                 tft.fillScreen(HALEHOUND_BLACK);
@@ -1459,8 +1459,8 @@ static void updateAttackStats() {
 
 // Draw attack screen - MATCHES ORIGINAL ESP32-DIV EXACTLY
 static void drawAttackScreen() {
-    tft.drawLine(0, 19, 240, 19, HALEHOUND_CYAN);
-    tft.fillRect(0, 37, 240, 320, HALEHOUND_BLACK);
+    tft.drawLine(0, 19, tft.width(), 19, HALEHOUND_CYAN);
+    tft.fillRect(0, 37, tft.width(), tft.height(), HALEHOUND_BLACK);
     tft.setTextSize(1);
 
     drawDeautherUI();
@@ -1716,8 +1716,8 @@ void loop() {
                     lastIconTap = millis();
                     return;
                 }
-                // Rescan icon at x=215-240
-                else if (tx >= 215 && tx <= 240) {
+                // Rescan icon at right edge
+                else if (tx >= (tft.width() - 25) && tx <= tft.width()) {
                     if (selectedApIndex == -1) {
                         scanNetworks();
                         // Log to wardriving if enabled
@@ -1816,8 +1816,8 @@ void loop() {
                     delay(100);
                 }
             }
-            // Bottom tab bar touch (y=290-320) - MATCHES ORIGINAL
-            else if (!scanning && ty >= 290 && ty <= 320) {
+            // Bottom tab bar touch (bottom 30px)
+            else if (!scanning && ty >= (tft.height() - 30) && ty <= tft.height()) {
                 // Rescan button: x=0-57
                 if (tx >= 0 && tx <= 57) {
                     drawButton(0, 304, 57, 16, "Rescan", true, false);
@@ -1883,8 +1883,8 @@ void loop() {
                     delay(100);
                 }
             }
-            // Bottom tab bar (y=290-320) - MATCHES ORIGINAL
-            else if (ty >= 290 && ty <= 320) {
+            // Bottom tab bar (bottom 30px)
+            else if (ty >= (tft.height() - 30) && ty <= tft.height()) {
                 // Start/Stop button: x=0-57
                 if (tx >= 0 && tx <= 57) {
                     drawButton(0, 304, 57, 16, attackRunning ? "Stop" : "Start", true, false);
@@ -2635,8 +2635,8 @@ void loop() {
                 drawProbeLog();
                 return;
             }
-            // Power/Stop icon at x=205-240
-            else if (tx >= 205 && tx <= 240) {
+            // Power/Stop icon at right edge
+            else if (tx >= (tft.width() - 35) && tx <= tft.width()) {
                 sniffing = !sniffing;
                 if (sniffing) {
                     addProbeToLog("---", "RESUMED", false);
@@ -4872,8 +4872,8 @@ static void handleTouch() {
             waitForReleaseFlag = true;
             return;
         }
-        // Credentials list (x=215)
-        if (tx >= 205 && tx <= 240) {
+        // Credentials list at right edge
+        if (tx >= (tft.width() - 35) && tx <= tft.width()) {
             credPage = 0;
             waitForReleaseFlag = true;
             drawCredList();

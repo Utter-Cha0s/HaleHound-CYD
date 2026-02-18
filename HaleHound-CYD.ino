@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HaleHound-CYD Main Firmware
 // ESP32 Cheap Yellow Display Edition
-// Matches ESP32-DIV HaleHound v2.5.0 EXACTLY
+// Matches ESP32-DIV HaleHound v2.6.0 EXACTLY
 // Created: 2026-02-06
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -211,12 +211,13 @@ const unsigned char *tools_submenu_icons[tools_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_go_back
 };
 
-// Settings Submenu - 5 items
-const int settings_NUM_SUBMENU_ITEMS = 5;
+// Settings Submenu - 6 items
+const int settings_NUM_SUBMENU_ITEMS = 6;
 const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
     "Brightness",
     "Screen Timeout",
     "Swap Colors",
+    "Rotation",
     "Device Info",
     "Back to Main Menu"
 };
@@ -225,6 +226,7 @@ const unsigned char *settings_submenu_icons[settings_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_eye2,
     bitmap_icon_led,
+    bitmap_icon_follow,
     bitmap_icon_stat,
     bitmap_icon_go_back
 };
@@ -249,6 +251,7 @@ int brightness_level = 255;
 int screen_timeout_seconds = 60;
 bool screen_asleep = false;
 bool color_order_rgb = false;  // false = BGR (default), true = RGB (swapped panels)
+uint8_t screen_rotation = 0;  // 0 = Standard (USB down), 2 = Flipped 180 (USB up)
 
 // Timeout option tables
 const int timeoutOptions[] = {30, 60, 120, 300, 600, 0};
@@ -1189,7 +1192,7 @@ void displayTimeoutControl() {
     tft.setTextSize(2);
     tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
     int tw = strlen(timeoutLabels[idx]) * 12;
-    tft.setCursor((240 - tw) / 2, 105);
+    tft.setCursor((tft.width() - tw) / 2, 105);
     tft.print(timeoutLabels[idx]);
 
     // Arrow hints
@@ -1325,6 +1328,120 @@ void colorSwapLoop() {
             saveSettings();
             displayColorSwap();
             delay(300);
+        }
+
+        delay(50);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROTATION CONTROL
+// ═══════════════════════════════════════════════════════════════════════════
+
+void displayRotationScreen() {
+    int sw = tft.width();
+    int sh = tft.height();
+
+    tft.fillScreen(TFT_BLACK);
+    tft.drawRect(2, 2, sw - 4, sh - 4, HALEHOUND_HOTPINK);
+    tft.drawLine(0, 19, sw, 19, HALEHOUND_CYAN);
+    tft.fillRect(0, 20, sw, 16, HALEHOUND_DARK);
+    tft.drawBitmap(10, 20, bitmap_icon_go_back, 16, 16, HALEHOUND_CYAN);
+    tft.drawLine(0, 36, sw, 36, HALEHOUND_HOTPINK);
+
+    drawGlitchTitle(48, "ROTATION");
+
+    // Current rotation label
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(15, 72);
+    tft.print("Current: ");
+    tft.setTextColor(HALEHOUND_CYAN);
+    const char* rotNames[] = {"Standard", "Landscape CW", "Flipped 180", "Landscape CCW"};
+    tft.print(rotNames[screen_rotation]);
+
+    // 4 rotation options — compact layout
+    const uint8_t rotVals[] = {0, 2, 1, 3};
+    const char* rotLabels[] = {"Standard", "Flipped 180", "90 CW", "90 CCW"};
+    const char* rotDescs[] = {"USB at bottom", "USB at top", "USB at left", "USB at right"};
+    int boxW = sw - 40;
+    int boxH = 35;
+    int startY = 88;
+    int gap = 4;
+
+    for (int i = 0; i < 4; i++) {
+        int y = startY + i * (boxH + gap);
+        uint16_t col = (screen_rotation == rotVals[i]) ? HALEHOUND_MAGENTA : HALEHOUND_CYAN;
+        tft.drawRect(20, y, boxW, boxH, col);
+        tft.setTextColor(col);
+        tft.setTextSize(2);
+        tft.setCursor(30, y + 4);
+        tft.print(rotLabels[i]);
+        tft.setTextSize(1);
+        tft.setTextColor(TFT_WHITE);
+        tft.setCursor(30, y + 22);
+        tft.print(rotDescs[i]);
+    }
+
+    // Info text
+    int infoY = startY + 4 * (boxH + gap) + 4;
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setTextSize(1);
+    tft.setCursor(15, infoY);
+    tft.print("Touch recal runs after change.");
+
+    tft.setTextColor(TFT_DARKGREY);
+    tft.setCursor(15, infoY + 16);
+    tft.print("BOOT button = back");
+}
+
+static void applyNewRotation(uint8_t newRot) {
+    extern bool touch_calibrated;
+
+    screen_rotation = newRot;
+    tft.setRotation(newRot);
+    applyColorOrder();
+
+    // Invalidate touch calibration — axes change with rotation
+    touch_calibrated = false;
+    saveSettings();
+
+    // Screen just changed — run calibration immediately
+    runTouchCalibration();
+}
+
+void rotationControlLoop() {
+    displayRotationScreen();
+
+    int sw = tft.width();
+    int boxW = sw - 40;
+    int boxH = 35;
+    int startY = 88;
+    int gap = 4;
+    const uint8_t rotVals[] = {0, 2, 1, 3};
+
+    while (!feature_exit_requested) {
+        touchButtonsUpdate();
+
+        if (isInoBackTapped() || buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+            feature_exit_requested = true;
+            break;
+        }
+
+        // Check all 4 rotation buttons
+        for (int i = 0; i < 4; i++) {
+            int y = startY + i * (boxH + gap);
+            if (isTouchInArea(20, y, boxW, boxH)) {
+                if (screen_rotation != rotVals[i]) {
+                    applyNewRotation(rotVals[i]);
+                    // Recalc dimensions after rotation change
+                    sw = tft.width();
+                    boxW = sw - 40;
+                    displayRotationScreen();
+                }
+                delay(300);
+                break;
+            }
         }
 
         delay(50);
@@ -1541,7 +1658,7 @@ void displayDeviceInfo() {
 
     tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
     y += 18;
-    tft.setCursor(10, y); tft.print("Version: v2.5.0 CYD Edition");
+    tft.setCursor(10, y); tft.print("Version: v2.6.0 CYD Edition");
     y += 18;
     tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
     y += 18;
@@ -1595,7 +1712,7 @@ void displayDeviceInfo() {
                 y = 75;
                 tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
                 y += 18;
-                tft.setCursor(10, y); tft.print("Version: v2.5.0 CYD Edition");
+                tft.setCursor(10, y); tft.print("Version: v2.6.0 CYD Edition");
                 y += 18;
                 tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
                 y += 18;
@@ -1638,7 +1755,7 @@ void handleSettingsSubmenuTouch() {
             displaySubmenu();
             delay(200);
 
-            if (current_submenu_index == 4) { // Back
+            if (current_submenu_index == 5) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -1656,7 +1773,10 @@ void handleSettingsSubmenuTouch() {
                 case 2: // Swap Colors
                     colorSwapLoop();
                     break;
-                case 3: // Device Info
+                case 3: // Rotation
+                    rotationControlLoop();
+                    break;
+                case 4: // Device Info
                     displayDeviceInfo();
                     break;
             }
@@ -1696,7 +1816,7 @@ void handleAboutPage() {
     drawGlitchStatus(80, "CYD Edition", HALEHOUND_CYAN);
 
     // Version centered
-    drawCenteredText(90, "v2.5.0", HALEHOUND_VIOLET, 1);
+    drawCenteredText(90, "v2.6.0", HALEHOUND_VIOLET, 1);
 
     // Separator
     tft.drawLine(20, 100, SCREEN_WIDTH - 20, 100, HALEHOUND_VIOLET);
@@ -1866,7 +1986,7 @@ void showSplash() {
 
     // Version
     tft.setTextSize(1);
-    drawCenteredText(130, "v2.5.0", HALEHOUND_VIOLET, 1);
+    drawCenteredText(130, "v2.6.0", HALEHOUND_VIOLET, 1);
 
     // Board info
     drawCenteredText(140, CYD_BOARD_NAME, HALEHOUND_VIOLET, 1);
@@ -1874,6 +1994,194 @@ void showSplash() {
     // Credits
     drawCenteredText(SCREEN_HEIGHT - 40, "by JesseCHale", HALEHOUND_GUNMETAL, 1);
     drawCenteredText(SCREEN_HEIGHT - 25, "github.com/JesseCHale", HALEHOUND_GUNMETAL, 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOT DIAGNOSTICS — Shows radio/SPI status on TFT (works without serial)
+// ═══════════════════════════════════════════════════════════════════════════
+
+void runBootDiagnostics() {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextSize(1);
+    int y = 5;
+
+    // Title
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(30, y);
+    tft.print("=== BOOT DIAGNOSTICS ===");
+    y += 18;
+
+    // SPI bus info
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("SPI Bus: SCK=%d MISO=%d MOSI=%d", VSPI_SCK, VSPI_MISO, VSPI_MOSI);
+    y += 16;
+
+    // ── NRF24 TEST ──────────────────────────────────────────────
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("NRF24: CE=%d CSN=%d", NRF24_CE, NRF24_CSN);
+    y += 12;
+
+    // Deselect all CS pins
+    pinMode(SD_CS, OUTPUT);       digitalWrite(SD_CS, HIGH);
+    pinMode(CC1101_CS, OUTPUT);   digitalWrite(CC1101_CS, HIGH);
+    pinMode(NRF24_CSN, OUTPUT);   digitalWrite(NRF24_CSN, HIGH);
+    pinMode(NRF24_CE, OUTPUT);    digitalWrite(NRF24_CE, LOW);
+
+    // Fresh SPI init
+    SPI.end();
+    delay(10);
+    SPI.begin(VSPI_SCK, VSPI_MISO, VSPI_MOSI);
+    SPI.setFrequency(4000000);
+    delay(10);
+
+    // Try NRF24 STATUS register read — 3 attempts with increasing delays
+    bool nrfFound = false;
+    byte nrfStatus[3] = {0, 0, 0};
+    int nrfDelays[] = {10, 100, 500};
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        delay(nrfDelays[attempt]);
+
+        // NRF24 returns STATUS byte on first SPI transfer of any command
+        digitalWrite(NRF24_CSN, LOW);
+        delayMicroseconds(5);
+        nrfStatus[attempt] = SPI.transfer(0x07);
+        SPI.transfer(0xFF);
+        digitalWrite(NRF24_CSN, HIGH);
+
+        if (nrfStatus[attempt] != 0x00 && nrfStatus[attempt] != 0xFF) {
+            nrfFound = true;
+        }
+    }
+
+    // Show raw STATUS bytes from all 3 attempts
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("  RAW: 0x%02X  0x%02X  0x%02X", nrfStatus[0], nrfStatus[1], nrfStatus[2]);
+    y += 12;
+
+    tft.setCursor(5, y);
+    if (nrfFound) {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.print("  >> NRF24 DETECTED");
+        for (int i = 0; i < 3; i++) {
+            if (nrfStatus[i] != 0x00 && nrfStatus[i] != 0xFF) {
+                tft.printf(" (try %d +%dms)", i + 1, nrfDelays[i]);
+                break;
+            }
+        }
+    } else {
+        tft.setTextColor(TFT_RED, TFT_BLACK);
+        tft.print("  >> NRF24 NOT FOUND");
+    }
+    y += 18;
+
+    // ── CC1101 TEST ─────────────────────────────────────────────
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("CC1101: CS=%d GDO0=%d GDO2=%d", CC1101_CS, CC1101_GDO0, CC1101_GDO2);
+    y += 12;
+
+    // Reset SPI for ELECHOUSE library
+    SPI.end();
+    delay(10);
+
+    // Deselect NRF24 before CC1101 test
+    pinMode(NRF24_CSN, OUTPUT);
+    digitalWrite(NRF24_CSN, HIGH);
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+
+    ELECHOUSE_cc1101.setSpiPin(VSPI_SCK, VSPI_MISO, VSPI_MOSI, CC1101_CS);
+    ELECHOUSE_cc1101.setGDO(CC1101_GDO0, CC1101_GDO2);
+
+    bool cc1101Found = ELECHOUSE_cc1101.getCC1101();
+
+    tft.setCursor(5, y);
+    if (cc1101Found) {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.print("  >> CC1101 DETECTED");
+    } else {
+        tft.setTextColor(TFT_RED, TFT_BLACK);
+        tft.print("  >> CC1101 NOT FOUND");
+    }
+    y += 18;
+
+    // ── SD CARD TEST ────────────────────────────────────────────
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("SD Card: CS=%d", SD_CS);
+    y += 12;
+
+    SPI.end();
+    delay(5);
+    SPI.begin(VSPI_SCK, VSPI_MISO, VSPI_MOSI);
+    pinMode(NRF24_CSN, OUTPUT);   digitalWrite(NRF24_CSN, HIGH);
+    pinMode(CC1101_CS, OUTPUT);   digitalWrite(CC1101_CS, HIGH);
+
+    // Send CMD0 (GO_IDLE) — card present returns 0x01
+    digitalWrite(SD_CS, LOW);
+    delayMicroseconds(5);
+    for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
+    SPI.transfer(0x40);
+    SPI.transfer(0x00);
+    SPI.transfer(0x00);
+    SPI.transfer(0x00);
+    SPI.transfer(0x00);
+    SPI.transfer(0x95);
+    byte sdResp = SPI.transfer(0xFF);
+    byte sdResp2 = SPI.transfer(0xFF);
+    digitalWrite(SD_CS, HIGH);
+
+    tft.setCursor(5, y);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.printf("  RESP: 0x%02X 0x%02X", sdResp, sdResp2);
+    if (sdResp == 0x01) {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.print(" (card OK)");
+    }
+    y += 18;
+
+    // ── SYSTEM INFO ─────────────────────────────────────────────
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(5, y);
+    tft.printf("Heap:%d  CPU:%dMHz  Flash:%dMB",
+        ESP.getFreeHeap(), ESP.getCpuFreqMHz(),
+        ESP.getFlashChipSize() / 1024 / 1024);
+    y += 12;
+
+    uint64_t mac = ESP.getEfuseMac();
+    tft.setCursor(5, y);
+    tft.printf("MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+        (uint8_t)(mac), (uint8_t)(mac >> 8), (uint8_t)(mac >> 16),
+        (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+    y += 18;
+
+    // ── COUNTDOWN ───────────────────────────────────────────────
+    bool hasError = !nrfFound || !cc1101Found;
+    int waitTime = hasError ? 8 : 3;
+
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    for (int i = waitTime; i > 0; i--) {
+        tft.fillRect(5, y, 230, 12, TFT_BLACK);
+        tft.setCursor(5, y);
+        if (hasError) {
+            tft.printf("CHECK WIRING! Continuing in %d...", i);
+        } else {
+            tft.printf("All radios OK! Continuing in %d...", i);
+        }
+        delay(1000);
+    }
+
+    // Restore SPI bus to clean state for spiManager
+    SPI.end();
+    delay(5);
+    SPI.begin(VSPI_SCK, VSPI_MISO, VSPI_MOSI);
+    pinMode(SD_CS, OUTPUT);       digitalWrite(SD_CS, HIGH);
+    pinMode(CC1101_CS, OUTPUT);   digitalWrite(CC1101_CS, HIGH);
+    pinMode(NRF24_CSN, OUTPUT);   digitalWrite(NRF24_CSN, HIGH);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1887,7 +2195,7 @@ void setup() {
 
     Serial.println();
     Serial.println("===============================================");
-    Serial.println("        HALEHOUND-CYD FIRMWARE v2.5.0");
+    Serial.println("        HALEHOUND-CYD FIRMWARE v2.6.0");
     Serial.println("        " CYD_BOARD_NAME);
     Serial.println("===============================================");
     Serial.println();
@@ -1912,15 +2220,24 @@ void setup() {
     spiManagerSetup();
     Serial.println("[INIT] SPI Manager OK");
 
+    // Boot diagnostics disabled for normal boot — function kept for second board debugging
+    // runBootDiagnostics();
+
     // Touch buttons
     initButtons();
     Serial.println("[INIT] Touch buttons OK");
 
     // Touch test available via runTouchTest() if needed for recalibration
 
-    // Load settings from EEPROM (brightness, timeout, color order, touch cal)
+    // Load settings from EEPROM (brightness, timeout, color order, rotation, touch cal)
     loadSettings();
     ledcWrite(0, brightness_level);
+
+    // Apply saved rotation — must happen before applyColorOrder (which needs correct MADCTL base)
+    if (screen_rotation != 0) {
+        tft.setRotation(screen_rotation);
+        Serial.printf("[INIT] Rotation set to %d\n", screen_rotation);
+    }
     applyColorOrder();
     Serial.println("[INIT] Settings loaded");
 

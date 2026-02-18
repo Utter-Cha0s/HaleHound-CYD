@@ -102,7 +102,7 @@ static void redrawTerminal() {
     if (totalVisible < TERM_ROWS) {
         int clearY = TERM_Y_START + totalVisible * TERM_ROW_HEIGHT;
         int clearH = (TERM_ROWS - totalVisible) * TERM_ROW_HEIGHT;
-        tft.fillRect(0, clearY, 240, clearH, TFT_BLACK);
+        tft.fillRect(0, clearY, tft.width(), clearH, TFT_BLACK);
     }
 }
 
@@ -133,7 +133,7 @@ static void scrollAndDrawLine(const char* text) {
 // =============================================================================
 
 static void updateStatusLine() {
-    tft.fillRect(0, STATUS_Y, 240, 16, TFT_BLACK);
+    tft.fillRect(0, STATUS_Y, tft.width(), 16, TFT_BLACK);
     tft.setTextSize(1);
 
     // RX byte count - left side
@@ -246,7 +246,7 @@ static void drawBaudSelector() {
     tft.setTextSize(2);
     tft.setTextColor(TERM_TEXT_COLOR, TFT_BLACK);
     int textW = strlen(buf) * 12;  // Size 2 = 12px per char
-    tft.setCursor((240 - textW) / 2, 95);
+    tft.setCursor((tft.width() - textW) / 2, 95);
     tft.print(buf);
 
     // Tap arrows
@@ -296,7 +296,7 @@ static void drawStartButton() {
 }
 
 static void drawWiringHint() {
-    tft.fillRect(0, 250, 240, 30, TFT_BLACK);
+    tft.fillRect(0, 250, tft.width(), 30, TFT_BLACK);
     tft.setTextSize(1);
     tft.setTextColor(HALEHOUND_GUNMETAL);
     if (selectedPin == UART_PIN_P1) {
@@ -386,8 +386,8 @@ static int handleConfigTouch() {
         return 0;
     }
 
-    // START button (y=200-240, x=40-200)
-    if (ty >= 200 && ty <= 240 && tx >= 40 && tx <= 200) {
+    // START button (bottom area, x=40-200)
+    if (ty >= (tft.height() - 120) && ty <= (tft.height() - 80) && tx >= 40 && tx <= 200) {
         delay(150);
         return 1;
     }
@@ -568,7 +568,7 @@ void serialMonitorScreen() {
             ringClear();
             totalBytesRx = 0;
             lineBufPos = 0;
-            tft.fillRect(0, TERM_Y_START, 240, TERM_ROWS * TERM_ROW_HEIGHT, TFT_BLACK);
+            tft.fillRect(0, TERM_Y_START, tft.width(), TERM_ROWS * TERM_ROW_HEIGHT, TFT_BLACK);
             updateStatusLine();
         }
 

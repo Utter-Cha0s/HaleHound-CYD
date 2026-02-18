@@ -390,7 +390,7 @@ static int chaosStep = 0;
 #define SP_LOG_MAX_LINES 12
 #define SP_LOG_LINE_HEIGHT 12
 #define SP_LOG_START_Y 95
-#define SP_LOG_END_Y 240
+#define SP_LOG_END_Y (tft.height() - 80)
 
 static char logLines[SP_LOG_MAX_LINES][42];  // Fixed char buffers (no heap alloc)
 static uint16_t logColors[SP_LOG_MAX_LINES];
@@ -1250,8 +1250,8 @@ void loop() {
                 prevDevice();
                 return;
             }
-            // Next device icon (x=215)
-            else if (tx >= 205 && tx <= 240) {
+            // Next device icon at right edge
+            else if (tx >= (tft.width() - 35) && tx <= tft.width()) {
                 nextDevice();
                 return;
             }
@@ -2133,7 +2133,7 @@ static int bscanIconY = 20;
 
 // Draw icon bar - MATCHES ORIGINAL ESP32-DIV
 static void drawBleScanUI() {
-    tft.drawLine(0, 19, 240, 19, HALEHOUND_CYAN);
+    tft.drawLine(0, 19, tft.width(), 19, HALEHOUND_CYAN);
     tft.fillRect(140, 20, SCREEN_WIDTH - 140, 16, HALEHOUND_GUNMETAL);
     tft.drawBitmap(bscanIconX[0], bscanIconY, bitmap_icon_undo, BSCAN_ICON_SIZE, BSCAN_ICON_SIZE, HALEHOUND_CYAN);
     tft.drawBitmap(bscanIconX[1], bscanIconY, bitmap_icon_go_back, BSCAN_ICON_SIZE, BSCAN_ICON_SIZE, HALEHOUND_CYAN);
@@ -3389,8 +3389,8 @@ void loop() {
                 drawBjMainUI();
                 return;
             }
-            // Cycle mode icon (x=215)
-            else if (tx >= 205 && tx <= 240) {
+            // Cycle mode icon at right edge
+            else if (tx >= (tft.width() - 35) && tx <= tft.width()) {
                 nextMode();
                 drawBjMainUI();
                 return;
@@ -4073,9 +4073,9 @@ static void showDeviceDetail(int idx) {
     detailView = true;
 
     // Draw overlay
-    tft.fillRect(10, 40, 220, 240, HALEHOUND_BLACK);
-    tft.drawRect(10, 40, 220, 240, HALEHOUND_HOTPINK);
-    tft.drawRect(11, 41, 218, 238, HALEHOUND_VIOLET);
+    tft.fillRect(10, 40, tft.width() - 20, tft.height() - 80, HALEHOUND_BLACK);
+    tft.drawRect(10, 40, tft.width() - 20, tft.height() - 80, HALEHOUND_HOTPINK);
+    tft.drawRect(11, 41, tft.width() - 22, tft.height() - 82, HALEHOUND_VIOLET);
 
     int y = 52;
     tft.setTextSize(1);

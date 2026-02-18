@@ -207,24 +207,35 @@ static bool nrfInit() {
     pinMode(5, OUTPUT);
     digitalWrite(5, HIGH);   // Deselect SD card
 
-    // Reset SPI bus and reinitialize (fixes conflict after CC1101 operations)
+    // Reset SPI bus with proper settle time between end/begin
     SPI.end();
+    delay(10);
     SPI.begin(18, 19, 23);  // NO CS pin - manual control with digitalWrite
     SPI.setDataMode(SPI_MODE0);
-    SPI.setFrequency(10000000);
+    SPI.setFrequency(4000000);  // 4MHz — conservative for reliable detection
     SPI.setBitOrder(MSBFIRST);
+    delay(10);
 
-    delay(5);
+    // Try up to 3 times with increasing delays — some boards need longer settle
+    bool found = false;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) delay(attempt * 100);  // 0ms, 100ms, 200ms
 
-    // Power up and configure - SIMPLE (matches working ESP32-DIV)
-    nrfDisable();
-    nrfPowerUp();
-    nrfSetRegister(_NRF24_EN_AA, 0x00);       // Disable auto-ack
-    nrfSetRegister(_NRF24_RF_SETUP, 0x0F);    // 2Mbps, max power
+        nrfDisable();
+        nrfPowerUp();
+        nrfSetRegister(_NRF24_EN_AA, 0x00);       // Disable auto-ack
+        nrfSetRegister(_NRF24_RF_SETUP, 0x0F);    // 2Mbps, max power
 
-    // Verify NRF24 is responding
-    byte status = nrfGetRegister(_NRF24_STATUS);
-    return (status != 0x00 && status != 0xFF);
+        byte status = nrfGetRegister(_NRF24_STATUS);
+        if (status != 0x00 && status != 0xFF) {
+            found = true;
+            // Bump to full speed now that we know the chip is alive
+            SPI.setFrequency(8000000);
+            break;
+        }
+    }
+
+    return found;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -383,7 +394,7 @@ static void drawBarGraph() {
 
     // Status area - compact layout below graph
     int statusY = BAR_START_Y + BAR_HEIGHT + 6;
-    tft.fillRect(0, statusY, SCREEN_WIDTH, 320 - statusY, TFT_BLACK);
+    tft.fillRect(0, statusY, SCREEN_WIDTH, tft.height() - statusY, TFT_BLACK);
 
     // Divider line
     tft.drawFastHLine(0, statusY - 2, SCREEN_WIDTH, HALEHOUND_HOTPINK);

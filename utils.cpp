@@ -320,7 +320,7 @@ String getElapsedTimeString(uint32_t startMillis) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define EEPROM_SIZE 512
-#define EEPROM_MAGIC 0xCD04
+#define EEPROM_MAGIC 0xCD05   // Bumped from 0xCD04 — added rotation field
 
 // Globals defined in HaleHound-CYD.ino
 extern int brightness_level;
@@ -341,6 +341,7 @@ struct Settings {
     uint16_t touchYMax;        // raw value that maps to screenY=319
     uint16_t screenTimeout;
     uint8_t colorSwap;         // 0 = BGR (default), 1 = RGB
+    uint8_t rotation;          // TFT rotation: 0 = Standard, 2 = Flipped 180
 };
 
 static Settings settings;
@@ -351,6 +352,7 @@ void saveSettings() {
     extern uint8_t touch_cal_y_source;
     extern uint16_t touch_cal_y_min, touch_cal_y_max;
     extern bool touch_calibrated;
+    extern uint8_t screen_rotation;
 
     settings.magic = EEPROM_MAGIC;
     settings.brightness = (uint8_t)brightness_level;
@@ -363,6 +365,7 @@ void saveSettings() {
     settings.touchYSource = touch_cal_y_source;
     settings.touchYMin = touch_cal_y_min;
     settings.touchYMax = touch_cal_y_max;
+    settings.rotation = screen_rotation;
 
     EEPROM.begin(EEPROM_SIZE);
     EEPROM.put(0, settings);
@@ -370,8 +373,8 @@ void saveSettings() {
     EEPROM.end();
 
     #if CYD_DEBUG
-    Serial.printf("[UTILS] Settings saved (brightness=%d, timeout=%d, colorSwap=%d)\n",
-                  settings.brightness, settings.screenTimeout, settings.colorSwap);
+    Serial.printf("[UTILS] Settings saved (brightness=%d, timeout=%d, colorSwap=%d, rotation=%d)\n",
+                  settings.brightness, settings.screenTimeout, settings.colorSwap, settings.rotation);
     #endif
 }
 
@@ -394,6 +397,7 @@ void loadSettings() {
         settings.touchYMax = 3700;     // rawX high = screenY 319 (bottom)
         settings.screenTimeout = 60;
         settings.colorSwap = 0;
+        settings.rotation = 0;         // Standard portrait (USB down)
 
         #if CYD_DEBUG
         Serial.println("[UTILS] No valid settings found, using defaults");
@@ -403,6 +407,15 @@ void loadSettings() {
         brightness_level = settings.brightness;
         screen_timeout_seconds = settings.screenTimeout;
         color_order_rgb = (settings.colorSwap == 1);
+
+        // Apply rotation to global
+        extern uint8_t screen_rotation;
+        // Validate rotation — allow 0 (standard), 1 (90CW), 2 (180), 3 (90CCW)
+        if (settings.rotation <= 3) {
+            screen_rotation = settings.rotation;
+        } else {
+            screen_rotation = 0;  // fallback to standard if garbage
+        }
 
         // Apply touch calibration to globals
         extern uint8_t touch_cal_x_source;
@@ -420,26 +433,39 @@ void loadSettings() {
         touch_cal_y_max = settings.touchYMax;
 
         #if CYD_DEBUG
-        Serial.printf("[UTILS] Settings loaded (brightness=%d, timeout=%d, colorSwap=%d, touchCal=%d)\n",
-                      settings.brightness, settings.screenTimeout, settings.colorSwap, settings.touchCalibrated);
+        Serial.printf("[UTILS] Settings loaded (brightness=%d, timeout=%d, colorSwap=%d, rotation=%d, touchCal=%d)\n",
+                      settings.brightness, settings.screenTimeout, settings.colorSwap, settings.rotation, settings.touchCalibrated);
         #endif
     }
 }
 
 // Apply BGR/RGB color order to display via MADCTL register
+// Must be called AFTER tft.setRotation() since setRotation resets MADCTL
 void applyColorOrder() {
-    // After setRotation(0), MADCTL is 0x48 (MX + BGR)
+    // ILI9341 MADCTL base values per rotation (set by TFT_eSPI setRotation):
+    //   Rotation 0: 0x48 (MX + BGR)
+    //   Rotation 1: 0x28 (MV + BGR)       — landscape, Phase 2
+    //   Rotation 2: 0x88 (MY + BGR)
+    //   Rotation 3: 0xE8 (MY+MX+MV + BGR) — landscape, Phase 2
     // BGR bit is bit 3 (0x08) — clear it for RGB panels
-    uint8_t madctl = 0x48;  // Default: MX + BGR
+    uint8_t madctl;
+    uint8_t rot = tft.getRotation();
+    switch (rot) {
+        case 0:  madctl = 0x48; break;  // MX + BGR
+        case 1:  madctl = 0x28; break;  // MV + BGR
+        case 2:  madctl = 0x88; break;  // MY + BGR
+        case 3:  madctl = 0xE8; break;  // MY + MX + MV + BGR
+        default: madctl = 0x48; break;
+    }
     if (color_order_rgb) {
-        madctl = 0x40;      // MX only, no BGR = RGB mode
+        madctl &= ~0x08;  // Clear BGR bit for RGB mode
     }
     tft.writecommand(0x36);
     tft.writedata(madctl);
 
     #if CYD_DEBUG
-    Serial.printf("[UTILS] Color order: %s (MADCTL=0x%02X)\n",
-                  color_order_rgb ? "RGB" : "BGR", madctl);
+    Serial.printf("[UTILS] Color order: %s, rotation=%d (MADCTL=0x%02X)\n",
+                  color_order_rgb ? "RGB" : "BGR", rot, madctl);
     #endif
 }
 

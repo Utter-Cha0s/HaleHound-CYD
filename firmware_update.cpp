@@ -177,7 +177,7 @@ static const char* getFileName(const char* path) {
 
 static void drawFileList() {
     // Clear list area
-    tft.fillRect(0, FW_LIST_Y_START, 240, FW_LIST_VISIBLE * FW_ITEM_HEIGHT, TFT_BLACK);
+    tft.fillRect(0, FW_LIST_Y_START, tft.width(), FW_LIST_VISIBLE * FW_ITEM_HEIGHT, TFT_BLACK);
 
     int visible = (binFileCount - scrollOffset);
     if (visible > FW_LIST_VISIBLE) visible = FW_LIST_VISIBLE;
@@ -257,7 +257,7 @@ static void drawFileSelectScreen() {
     snprintf(statusBuf, sizeof(statusBuf), "SD: %d file%s found",
              binFileCount, binFileCount == 1 ? "" : "s");
     int sw = strlen(statusBuf) * 6;
-    tft.setCursor((240 - sw) / 2, 68);
+    tft.setCursor((tft.width() - sw) / 2, 68);
     tft.print(statusBuf);
 
     // File list
@@ -460,7 +460,7 @@ static void updateProgressBar(int pct) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", pct);
     int tw = strlen(buf) * 12;
-    tft.setCursor((240 - tw) / 2, 145);
+    tft.setCursor((tft.width() - tw) / 2, 145);
     tft.print(buf);
 }
 
@@ -558,7 +558,7 @@ static void drawSuccessScreen() {
         char buf[32];
         snprintf(buf, sizeof(buf), "Rebooting in %d...", i);
         int tw = strlen(buf) * 6;
-        tft.setCursor((240 - tw) / 2, 145);
+        tft.setCursor((tft.width() - tw) / 2, 145);
         tft.print(buf);
         delay(1000);
     }
