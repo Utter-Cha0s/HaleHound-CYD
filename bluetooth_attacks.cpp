@@ -2416,6 +2416,559 @@ void cleanup() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AIRTAG DETECTOR - Apple FindMy Tracker Detection
+// Scans BLE advertisements for Apple FindMy network devices:
+//   - AirTags, FindMy accessories, OpenHaystack clones
+//   - Detects manufacturer data: Company 0x004C, Type 0x12, Len 0x19
+//   - Extracts battery level from status byte (bits 6-7)
+//   - Tracks unique devices by MAC with proximity RSSI bars
+//   - Auto-rescan every 5 seconds, alert flash on new tracker
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace AirTagDetect {
+
+#define AT_MAX_TRACKERS    20
+#define AT_MAX_VISIBLE     10
+#define AT_LINE_HEIGHT     18
+#define AT_SCAN_DURATION   4
+#define AT_RESCAN_INTERVAL 5000
+#define AT_ICON_SIZE       16
+
+// Tracked device struct
+struct TrackedTag {
+    uint8_t mac[6];
+    int rssi;
+    uint8_t battery;      // 0=full, 1=medium, 2=low, 3=critical
+    uint8_t statusByte;
+    unsigned long firstSeen;
+    unsigned long lastSeen;
+    bool isNew;
+};
+
+static TrackedTag trackers[AT_MAX_TRACKERS];
+static int trackerCount = 0;
+static int currentIndex = 0;
+static int listStartIndex = 0;
+
+static bool initialized = false;
+static bool exitRequested = false;
+static bool scanning = false;
+static bool detailView = false;
+static bool alertFlash = false;
+static unsigned long lastScanTime = 0;
+static unsigned long alertStart = 0;
+static int totalScans = 0;
+
+static BLEScan* pAtScan = nullptr;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+static String macToStr(const uint8_t* mac) {
+    char buf[18];
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return String(buf);
+}
+
+static const char* batteryStr(uint8_t level) {
+    switch (level) {
+        case 0: return "FULL";
+        case 1: return "MED";
+        case 2: return "LOW";
+        case 3: return "CRIT";
+        default: return "???";
+    }
+}
+
+static uint16_t batteryColor(uint8_t level) {
+    switch (level) {
+        case 0: return HALEHOUND_GREEN;
+        case 1: return HALEHOUND_MAGENTA;
+        case 2: return HALEHOUND_HOTPINK;
+        case 3: return 0xF800;  // Red
+        default: return HALEHOUND_GUNMETAL;
+    }
+}
+
+// Find existing tracker by MAC, returns index or -1
+static int findTracker(const uint8_t* mac) {
+    for (int i = 0; i < trackerCount; i++) {
+        if (memcmp(trackers[i].mac, mac, 6) == 0) return i;
+    }
+    return -1;
+}
+
+// Add or update a tracked device
+static bool addOrUpdateTracker(const uint8_t* mac, int rssi, uint8_t battery, uint8_t status) {
+    int idx = findTracker(mac);
+    if (idx >= 0) {
+        // Update existing
+        trackers[idx].rssi = rssi;
+        trackers[idx].battery = battery;
+        trackers[idx].statusByte = status;
+        trackers[idx].lastSeen = millis();
+        trackers[idx].isNew = false;
+        return false;  // Not new
+    }
+    if (trackerCount >= AT_MAX_TRACKERS) return false;
+
+    // Add new tracker
+    memcpy(trackers[trackerCount].mac, mac, 6);
+    trackers[trackerCount].rssi = rssi;
+    trackers[trackerCount].battery = battery;
+    trackers[trackerCount].statusByte = status;
+    trackers[trackerCount].firstSeen = millis();
+    trackers[trackerCount].lastSeen = millis();
+    trackers[trackerCount].isNew = true;
+    trackerCount++;
+    return true;  // New tracker found
+}
+
+// Estimate distance from RSSI
+static const char* proximityStr(int rssi) {
+    if (rssi > -40) return "< 1m";
+    if (rssi > -55) return "1-3m";
+    if (rssi > -70) return "3-8m";
+    if (rssi > -85) return "8-15m";
+    return "> 15m";
+}
+
+// Draw RSSI bar (5 segments)
+static void drawRssiBar(int x, int y, int rssi) {
+    int bars = 0;
+    if (rssi > -40) bars = 5;
+    else if (rssi > -55) bars = 4;
+    else if (rssi > -65) bars = 3;
+    else if (rssi > -75) bars = 2;
+    else if (rssi > -90) bars = 1;
+
+    for (int i = 0; i < 5; i++) {
+        int barH = 3 + i * 2;
+        int barY = y + (12 - barH);
+        uint16_t color = (i < bars) ? HALEHOUND_HOTPINK : HALEHOUND_GUNMETAL;
+        tft.fillRect(x + i * 4, barY, 3, barH, color);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI DRAWING
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void drawIconBar() {
+    tft.drawLine(0, 19, SCREEN_WIDTH, 19, HALEHOUND_MAGENTA);
+    tft.fillRect(0, 20, SCREEN_WIDTH, 16, HALEHOUND_GUNMETAL);
+    tft.drawBitmap(10, 20, bitmap_icon_go_back, AT_ICON_SIZE, AT_ICON_SIZE, HALEHOUND_MAGENTA);
+    tft.drawBitmap(210, 20, bitmap_icon_undo, AT_ICON_SIZE, AT_ICON_SIZE, HALEHOUND_MAGENTA);
+    tft.drawLine(0, 36, SCREEN_WIDTH, 36, HALEHOUND_HOTPINK);
+}
+
+static void drawTitle() {
+    tft.drawLine(0, 38, SCREEN_WIDTH, 38, HALEHOUND_HOTPINK);
+    drawGlitchTitle(58, "AIRTAG");
+    tft.drawLine(0, 62, SCREEN_WIDTH, 62, HALEHOUND_HOTPINK);
+}
+
+static void drawTrackerList() {
+    tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+
+    // Header line
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(5, 67);
+    tft.printf("TRACKERS: %d", trackerCount);
+    tft.setCursor(120, 67);
+    tft.printf("SCANS: %d", totalScans);
+
+    if (trackerCount == 0) {
+        tft.setTextColor(HALEHOUND_MAGENTA);
+        tft.setCursor(10, 100);
+        tft.print("No FindMy trackers detected");
+        tft.setTextColor(HALEHOUND_GUNMETAL);
+        tft.setCursor(10, 120);
+        tft.print("Scanning for AirTags,");
+        tft.setCursor(10, 135);
+        tft.print("FindMy accessories...");
+
+        // Scanning animation
+        if (scanning) {
+            static int dots = 0;
+            dots = (dots + 1) % 4;
+            tft.setTextColor(HALEHOUND_HOTPINK);
+            tft.setCursor(10, 160);
+            tft.print("[*] SCANNING");
+            for (int d = 0; d < dots; d++) tft.print(".");
+        }
+        return;
+    }
+
+    int y = 80;
+    for (int i = 0; i < AT_MAX_VISIBLE && i + listStartIndex < trackerCount; i++) {
+        int idx = i + listStartIndex;
+        TrackedTag& t = trackers[idx];
+
+        if (idx == currentIndex) {
+            tft.fillRect(0, y - 2, SCREEN_WIDTH, AT_LINE_HEIGHT, HALEHOUND_DARK);
+        }
+
+        // RSSI bars
+        drawRssiBar(5, y, t.rssi);
+
+        // MAC address (shortened)
+        uint16_t textCol = (idx == currentIndex) ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA;
+        tft.setTextColor(textCol);
+        tft.setCursor(28, y + 2);
+        char shortMac[12];
+        snprintf(shortMac, sizeof(shortMac), "%02X:%02X:%02X",
+                 t.mac[3], t.mac[4], t.mac[5]);
+        tft.print(shortMac);
+
+        // Battery
+        tft.setTextColor(batteryColor(t.battery));
+        tft.setCursor(88, y + 2);
+        tft.print(batteryStr(t.battery));
+
+        // RSSI value
+        tft.setTextColor(HALEHOUND_VIOLET);
+        tft.setCursor(125, y + 2);
+        tft.printf("%ddB", t.rssi);
+
+        // Proximity
+        tft.setTextColor(HALEHOUND_BRIGHT);
+        tft.setCursor(175, y + 2);
+        tft.print(proximityStr(t.rssi));
+
+        // New indicator
+        if (t.isNew) {
+            tft.fillCircle(SCREEN_WIDTH - 8, y + 5, 3, HALEHOUND_HOTPINK);
+        }
+
+        y += AT_LINE_HEIGHT;
+    }
+
+    // Footer
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(5, SCREEN_HEIGHT - 12);
+    tft.print("UP/DN=Nav SELECT=Details");
+}
+
+static void drawTrackerDetail() {
+    tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+
+    if (trackerCount == 0 || currentIndex >= trackerCount) return;
+
+    TrackedTag& t = trackers[currentIndex];
+    int y = 72;
+
+    // MAC
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("MAC: ");
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.print(macToStr(t.mac));
+    y += 18;
+
+    // Type
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("Type: ");
+    tft.setTextColor(HALEHOUND_BRIGHT);
+    tft.print("Apple FindMy Tracker");
+    y += 18;
+
+    // RSSI + Proximity
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("RSSI: ");
+    tft.setTextColor(HALEHOUND_BRIGHT);
+    tft.printf("%d dBm  (%s)", t.rssi, proximityStr(t.rssi));
+    y += 18;
+
+    // Large proximity bar
+    int barWidth = map(constrain(t.rssi, -100, -30), -100, -30, 5, 200);
+    tft.fillRect(10, y, barWidth, 10, HALEHOUND_HOTPINK);
+    tft.drawRect(10, y, 200, 10, HALEHOUND_VIOLET);
+    y += 18;
+
+    // Battery
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("Battery: ");
+    tft.setTextColor(batteryColor(t.battery));
+    tft.print(batteryStr(t.battery));
+    y += 18;
+
+    // Status byte raw
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("Status: ");
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.printf("0x%02X", t.statusByte);
+    y += 18;
+
+    // Time tracking
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("First seen: ");
+    tft.setTextColor(HALEHOUND_BRIGHT);
+    unsigned long elapsed = (millis() - t.firstSeen) / 1000;
+    if (elapsed < 60) {
+        tft.printf("%lus ago", elapsed);
+    } else {
+        tft.printf("%lum %lus ago", elapsed / 60, elapsed % 60);
+    }
+    y += 18;
+
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y);
+    tft.print("Last seen: ");
+    tft.setTextColor(HALEHOUND_BRIGHT);
+    unsigned long lastElapsed = (millis() - t.lastSeen) / 1000;
+    tft.printf("%lus ago", lastElapsed);
+
+    // Footer
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(5, SCREEN_HEIGHT - 12);
+    tft.print("BACK=Return to list");
+}
+
+static void drawAlertFlash() {
+    if (!alertFlash) return;
+    if (millis() - alertStart > 800) {
+        alertFlash = false;
+        return;
+    }
+    // Flash border
+    bool on = ((millis() - alertStart) / 100) % 2 == 0;
+    uint16_t color = on ? HALEHOUND_HOTPINK : HALEHOUND_BLACK;
+    tft.drawRect(0, 63, SCREEN_WIDTH, 3, color);
+    tft.drawRect(0, SCREEN_HEIGHT - 15, SCREEN_WIDTH, 3, color);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCANNING
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void processScanResults(BLEScanResults results) {
+    int count = results.getCount();
+    bool foundNew = false;
+
+    for (int i = 0; i < count; i++) {
+        BLEAdvertisedDevice device = results.getDevice(i);
+
+        if (!device.haveManufacturerData()) continue;
+
+        std::string mfgData = device.getManufacturerData();
+        if (mfgData.length() < 4) continue;
+
+        // Check for Apple company ID (0x004C) + FindMy type (0x12) + length (0x19)
+        uint8_t compLow = (uint8_t)mfgData[0];
+        uint8_t compHigh = (uint8_t)mfgData[1];
+        uint8_t type = (uint8_t)mfgData[2];
+        uint8_t len = (uint8_t)mfgData[3];
+
+        if (compLow != 0x4C || compHigh != 0x00) continue;  // Not Apple
+        if (type != 0x12 || len != 0x19) continue;           // Not FindMy
+
+        // Extract battery from status byte (bits 6-7)
+        uint8_t statusByte = (mfgData.length() > 4) ? (uint8_t)mfgData[4] : 0;
+        uint8_t battery = (statusByte >> 6) & 0x03;
+
+        // Get MAC
+        uint8_t mac[6];
+        memcpy(mac, *device.getAddress().getNative(), 6);
+
+        if (addOrUpdateTracker(mac, device.getRSSI(), battery, statusByte)) {
+            foundNew = true;
+
+            #if CYD_DEBUG
+            Serial.printf("[AIRTAG] NEW tracker: %s RSSI:%d BAT:%s\n",
+                          macToStr(mac).c_str(), device.getRSSI(), batteryStr(battery));
+            #endif
+        }
+    }
+
+    if (foundNew) {
+        alertFlash = true;
+        alertStart = millis();
+    }
+}
+
+static void runScan() {
+    scanning = true;
+    totalScans++;
+
+    BLEScanResults results = pAtScan->start(AT_SCAN_DURATION, false);
+    processScanResults(results);
+    pAtScan->clearResults();
+
+    scanning = false;
+    lastScanTime = millis();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETUP AND LOOP
+// ═══════════════════════════════════════════════════════════════════════════
+
+void setup() {
+    if (initialized) return;
+
+    #if CYD_DEBUG
+    Serial.println("[AIRTAG] Initializing detector...");
+    #endif
+
+    trackerCount = 0;
+    currentIndex = 0;
+    listStartIndex = 0;
+    totalScans = 0;
+    exitRequested = false;
+    detailView = false;
+    alertFlash = false;
+
+    tft.fillScreen(HALEHOUND_BLACK);
+    drawStatusBar();
+    drawIconBar();
+    drawTitle();
+
+    // Init BLE
+    BLEDevice::init("");
+    delay(150);
+
+    pAtScan = BLEDevice::getScan();
+    if (!pAtScan) {
+        Serial.println("[AIRTAG] ERROR: getScan() returned NULL");
+        tft.setTextColor(HALEHOUND_HOTPINK);
+        tft.setCursor(10, 100);
+        tft.print("BLE INIT FAILED");
+        exitRequested = true;
+        return;
+    }
+    pAtScan->setActiveScan(false);  // Passive scan — don't alert the tracker
+    pAtScan->setInterval(100);
+    pAtScan->setWindow(99);
+
+    initialized = true;
+
+    // First scan
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, 100);
+    tft.print("[*] Scanning for trackers...");
+    runScan();
+    drawTrackerList();
+
+    #if CYD_DEBUG
+    Serial.println("[AIRTAG] Detector ready");
+    #endif
+}
+
+void loop() {
+    if (!initialized) return;
+
+    touchButtonsUpdate();
+
+    // Icon bar touch
+    static unsigned long lastIconTap = 0;
+    if (millis() - lastIconTap > 200) {
+        uint16_t tx, ty;
+        if (getTouchPoint(&tx, &ty)) {
+            if (ty >= 20 && ty <= 36) {
+                if (tx >= 10 && tx < 26) {
+                    if (detailView) {
+                        detailView = false;
+                        drawTrackerList();
+                    } else {
+                        exitRequested = true;
+                    }
+                    lastIconTap = millis();
+                    return;
+                }
+                else if (tx >= 210 && tx < 226) {
+                    runScan();
+                    if (!detailView) drawTrackerList();
+                    lastIconTap = millis();
+                    return;
+                }
+            }
+        }
+    }
+
+    if (buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+        if (detailView) {
+            detailView = false;
+            drawTrackerList();
+        } else {
+            exitRequested = true;
+        }
+        return;
+    }
+
+    if (detailView) {
+        if (buttonPressed(BTN_LEFT)) {
+            detailView = false;
+            drawTrackerList();
+        }
+    } else {
+        if (buttonPressed(BTN_UP)) {
+            if (currentIndex > 0) {
+                currentIndex--;
+                if (currentIndex < listStartIndex) listStartIndex--;
+                drawTrackerList();
+            }
+        }
+
+        if (buttonPressed(BTN_DOWN)) {
+            if (currentIndex < trackerCount - 1) {
+                currentIndex++;
+                if (currentIndex >= listStartIndex + AT_MAX_VISIBLE) listStartIndex++;
+                drawTrackerList();
+            }
+        }
+
+        if (buttonPressed(BTN_RIGHT) || buttonPressed(BTN_SELECT)) {
+            if (trackerCount > 0) {
+                detailView = true;
+                drawTrackerDetail();
+            }
+        }
+
+        // Touch to select device
+        int touched = getTouchedMenuItem(80, AT_LINE_HEIGHT, min(AT_MAX_VISIBLE, trackerCount - listStartIndex));
+        if (touched >= 0) {
+            currentIndex = listStartIndex + touched;
+            detailView = true;
+            drawTrackerDetail();
+        }
+    }
+
+    // Auto-rescan
+    if (!scanning && millis() - lastScanTime >= AT_RESCAN_INTERVAL) {
+        runScan();
+        if (!detailView) drawTrackerList();
+    }
+
+    // Alert flash animation
+    drawAlertFlash();
+}
+
+bool isExitRequested() { return exitRequested; }
+
+void cleanup() {
+    if (pAtScan) pAtScan->stop();
+    BLEDevice::deinit(false);
+    initialized = false;
+    exitRequested = false;
+    trackerCount = 0;
+
+    #if CYD_DEBUG
+    Serial.println("[AIRTAG] Cleanup complete");
+    #endif
+}
+
+}  // namespace AirTagDetect
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BLE JAMMER IMPLEMENTATION - NRF24L01+PA+LNA Continuous Carrier Wave
 // Targets Bluetooth 2.402-2.480 GHz band (79 channels)
 // Uses same proven NRF24 technique as WLAN Jammer

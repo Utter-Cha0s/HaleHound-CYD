@@ -177,6 +177,28 @@ void cleanup();
 }  // namespace WhisperPair
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AIRTAG DETECT - Apple FindMy Tracker Detection
+// Scans for AirTags, FindMy accessories, and compatible trackers
+// Detects Apple manufacturer data (0x4C) with FindMy type (0x12)
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace AirTagDetect {
+
+// Initialize detector and start scanning
+void setup();
+
+// Main loop function
+void loop();
+
+// Check if user requested exit
+bool isExitRequested();
+
+// Cleanup and release BLE resources
+void cleanup();
+
+}  // namespace AirTagDetect
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BLE JAMMER - 2.4GHz BLE Jammer using NRF24L01+PA+LNA
 // Continuous carrier wave jamming on Bluetooth 2.402-2.480 GHz
 // Modes: ALL CHANNELS | ADV ONLY (Ch37/38/39) | DATA ONLY
