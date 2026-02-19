@@ -155,6 +155,28 @@ void cleanup();
 }  // namespace BleSniffer
 
 // ═══════════════════════════════════════════════════════════════════════════
+// WHISPERPAIR - CVE-2025-36911 Fast Pair Vulnerability Scanner
+// Scans for Google Fast Pair devices and probes for WhisperPair vulnerability
+// Phase 1: Discovery + GATT Service Probe
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace WhisperPair {
+
+// Initialize WhisperPair scanner
+void setup();
+
+// Main loop function
+void loop();
+
+// Check if user requested exit
+bool isExitRequested();
+
+// Cleanup and release BLE resources
+void cleanup();
+
+}  // namespace WhisperPair
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BLE JAMMER - 2.4GHz BLE Jammer using NRF24L01+PA+LNA
 // Continuous carrier wave jamming on Bluetooth 2.402-2.480 GHz
 // Modes: ALL CHANNELS | ADV ONLY (Ch37/38/39) | DATA ONLY

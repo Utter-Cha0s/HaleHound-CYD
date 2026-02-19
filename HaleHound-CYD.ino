@@ -117,14 +117,15 @@ const unsigned char *wifi_submenu_icons[NUM_SUBMENU_ITEMS] = {
     bitmap_icon_go_back
 };
 
-// Bluetooth Submenu - 6 items
-const int bluetooth_NUM_SUBMENU_ITEMS = 6;
+// Bluetooth Submenu - 7 items
+const int bluetooth_NUM_SUBMENU_ITEMS = 7;
 const char *bluetooth_submenu_items[bluetooth_NUM_SUBMENU_ITEMS] = {
     "BLE Jammer",
     "BLE Spoofer",
     "BLE Beacon",
     "Sniffer",
     "BLE Scanner",
+    "WhisperPair",
     "Back to Main Menu"
 };
 
@@ -134,6 +135,7 @@ const unsigned char *bluetooth_submenu_icons[bluetooth_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_signal,
     bitmap_icon_analyzer,
     bitmap_icon_graph,
+    bitmap_icon_eye,
     bitmap_icon_go_back
 };
 
@@ -723,7 +725,7 @@ void handleBluetoothSubmenuTouch() {
             displaySubmenu();
             delay(200);
 
-            if (current_submenu_index == 5) { // Back
+            if (current_submenu_index == 6) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -784,6 +786,17 @@ void handleBluetoothSubmenuTouch() {
                         if (isBackButtonTapped()) feature_exit_requested = true;
                     }
                     BleScan::cleanup();
+                    break;
+                case 5: // WhisperPair (CVE-2025-36911)
+                    WhisperPair::setup();
+                    while (!feature_exit_requested) {
+                        WhisperPair::loop();
+                        if (WhisperPair::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) feature_exit_requested = true;
+                    }
+                    WhisperPair::cleanup();
                     break;
             }
 
