@@ -2076,7 +2076,7 @@ namespace DeauthDetect {
 // Shows what SSIDs devices are probing for (recon gold!)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// HaleHound v2.6.0 UPGRADE - February 2026
+// HaleHound v2.6.2 UPGRADE - February 2026
 // - Tap to Spawn Evil Twin (tap SSID → launch Captive Portal with that name)
 // - Filter View (ALL/SSID/NEW toggle)
 // - Save Targets (Preferences-based)

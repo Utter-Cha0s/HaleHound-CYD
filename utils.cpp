@@ -10,6 +10,18 @@
 #include <EEPROM.h>
 
 // ═══════════════════════════════════════════════════════════════════════════
+// THEME COLOR DEFINITIONS — default palette (Jesse's pink/purple theme)
+// These are the actual storage for the extern declarations in shared.h
+// ═══════════════════════════════════════════════════════════════════════════
+
+uint16_t HALEHOUND_MAGENTA = 0x041F;  // Electric Blue - Primary (selected items)
+uint16_t HALEHOUND_HOTPINK = 0xF81F;  // Hot Pink - Accents
+uint16_t HALEHOUND_BRIGHT  = 0xF81F;  // Hot Pink - Highlights
+uint16_t HALEHOUND_VIOLET  = 0x780F;  // Purple - Accent color
+uint16_t HALEHOUND_CYAN    = 0xF81F;  // Hot Pink for text (was cyan/blue)
+uint16_t HALEHOUND_GREEN   = 0x780F;  // Purple (was neon green)
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BUTTON INPUT FUNCTIONS
 // These replace the PCF8574 I2C expander from ESP32-DIV
 // ═══════════════════════════════════════════════════════════════════════════
@@ -320,13 +332,14 @@ String getElapsedTimeString(uint32_t startMillis) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define EEPROM_SIZE 512
-#define EEPROM_MAGIC 0xCD06   // Bumped from 0xCD05 — added display inversion field
+#define EEPROM_MAGIC 0xCD07   // Bumped from 0xCD06 — added color mode field
 
 // Globals defined in HaleHound-CYD.ino
 extern int brightness_level;
 extern int screen_timeout_seconds;
 extern bool color_order_rgb;
 extern bool display_inverted;
+extern uint8_t color_mode;
 extern TFT_eSPI tft;
 
 struct Settings {
@@ -344,6 +357,7 @@ struct Settings {
     uint8_t colorSwap;         // 0 = BGR (default), 1 = RGB
     uint8_t rotation;          // TFT rotation: 0 = Standard, 2 = Flipped 180
     uint8_t displayInverted;   // 0 = normal, 1 = inverted (for 2USB/inverted panels)
+    uint8_t colorMode;         // 0 = Default, 1 = Colorblind, 2 = High Contrast
 };
 
 static Settings settings;
@@ -369,6 +383,7 @@ void saveSettings() {
     settings.touchYMax = touch_cal_y_max;
     settings.rotation = screen_rotation;
     settings.displayInverted = display_inverted ? 1 : 0;
+    settings.colorMode = color_mode;
 
     EEPROM.begin(EEPROM_SIZE);
     EEPROM.put(0, settings);
@@ -402,6 +417,7 @@ void loadSettings() {
         settings.colorSwap = 0;
         settings.rotation = 0;         // Standard portrait (USB down)
         settings.displayInverted = 0;  // Normal (no inversion)
+        settings.colorMode = 0;        // Default color palette
 
         #if CYD_DEBUG
         Serial.println("[UTILS] No valid settings found, using defaults");
@@ -412,6 +428,7 @@ void loadSettings() {
         screen_timeout_seconds = settings.screenTimeout;
         color_order_rgb = (settings.colorSwap == 1);
         display_inverted = (settings.displayInverted == 1);
+        color_mode = (settings.colorMode <= 2) ? settings.colorMode : 0;
 
         // Apply rotation to global
         extern uint8_t screen_rotation;
@@ -471,6 +488,43 @@ void applyColorOrder() {
     #if CYD_DEBUG
     Serial.printf("[UTILS] Color order: %s, rotation=%d (MADCTL=0x%02X)\n",
                   color_order_rgb ? "RGB" : "BGR", rot, madctl);
+    #endif
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COLOR MODE — 3 palette presets for colorblind accessibility
+// ═══════════════════════════════════════════════════════════════════════════
+
+void applyColorMode(uint8_t mode) {
+    switch (mode) {
+        case 1: // Deuteranopia — blue + yellow (red-green colorblind safe)
+            HALEHOUND_MAGENTA = 0x067F;  // Bright Blue — primary selection
+            HALEHOUND_HOTPINK = 0xFFE0;  // Yellow — accents
+            HALEHOUND_BRIGHT  = 0xFFE0;  // Yellow — highlights
+            HALEHOUND_VIOLET  = 0x067F;  // Bright Blue — accent
+            HALEHOUND_CYAN    = 0xFFE0;  // Yellow — text
+            HALEHOUND_GREEN   = 0x067F;  // Bright Blue — secondary
+            break;
+        case 2: // High Contrast — white + cyan (maximum visibility)
+            HALEHOUND_MAGENTA = 0x07FF;  // Bright Cyan — primary selection
+            HALEHOUND_HOTPINK = 0xFFFF;  // White — accents
+            HALEHOUND_BRIGHT  = 0xFFFF;  // White — highlights
+            HALEHOUND_VIOLET  = 0x07FF;  // Bright Cyan — accent
+            HALEHOUND_CYAN    = 0xFFFF;  // White — text
+            HALEHOUND_GREEN   = 0x07E0;  // True Green — secondary
+            break;
+        default: // Mode 0 — Default (Jesse's pink/purple theme)
+            HALEHOUND_MAGENTA = 0x041F;  // Electric Blue
+            HALEHOUND_HOTPINK = 0xF81F;  // Hot Pink
+            HALEHOUND_BRIGHT  = 0xF81F;  // Hot Pink
+            HALEHOUND_VIOLET  = 0x780F;  // Purple
+            HALEHOUND_CYAN    = 0xF81F;  // Hot Pink
+            HALEHOUND_GREEN   = 0x780F;  // Purple
+            break;
+    }
+
+    #if CYD_DEBUG
+    Serial.printf("[UTILS] Color mode applied: %d\n", mode);
     #endif
 }
 

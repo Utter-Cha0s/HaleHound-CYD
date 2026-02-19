@@ -12,36 +12,41 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HALEHOUND COLOR PALETTE
 // Jesse's Custom: Red/Purple/Pink theme (no yellow/orange)
+// Theme colors are extern — runtime-adjustable for colorblind modes
 // ═══════════════════════════════════════════════════════════════════════════
 
-const uint16_t HALEHOUND_MAGENTA = 0x041F;  // Electric Blue - Primary (selected items)
-const uint16_t HALEHOUND_HOTPINK = 0xF81F;  // Hot Pink - Accents
-const uint16_t HALEHOUND_BRIGHT = 0xF81F;   // Hot Pink - Highlights
-const uint16_t HALEHOUND_VIOLET = 0x780F;   // Purple - Accent color
+// Theme colors — changed by applyColorMode() at runtime
+extern uint16_t HALEHOUND_MAGENTA;   // Primary (selected items)
+extern uint16_t HALEHOUND_HOTPINK;   // Accents
+extern uint16_t HALEHOUND_BRIGHT;    // Highlights
+extern uint16_t HALEHOUND_VIOLET;    // Accent color
+extern uint16_t HALEHOUND_CYAN;      // Text color
+extern uint16_t HALEHOUND_GREEN;     // Secondary accent
+
+// Fixed colors — never change with color mode
 const uint16_t HALEHOUND_DARK = 0x2841;     // #2B080A - Dark backgrounds
-const uint16_t HALEHOUND_CYAN = 0xF81F;     // Hot Pink for text (was cyan/blue)
 const uint16_t HALEHOUND_BLACK = 0x0000;    // #000000 - Pure black
 const uint16_t HALEHOUND_GUNMETAL = 0x18E3; // #1C1C1C - Gunmetal gray
-const uint16_t HALEHOUND_GREEN = 0x780F;    // Purple (was neon green)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LEGACY COLOR MAPPINGS (for compatibility with original code)
+// Macros so they follow theme color changes at runtime
 // ═══════════════════════════════════════════════════════════════════════════
 
-const uint16_t SHREDDY_TEAL = HALEHOUND_CYAN;       // Remap teal -> cyan
-const uint16_t SHREDDY_PINK = HALEHOUND_MAGENTA;    // Remap pink -> magenta
-const uint16_t SHREDDY_BLACK = HALEHOUND_BLACK;
-const uint16_t SHREDDY_BLUE = HALEHOUND_CYAN;
-const uint16_t SHREDDY_PURPLE = HALEHOUND_VIOLET;
-const uint16_t SHREDDY_GREEN = HALEHOUND_GREEN;
-const uint16_t SHREDDY_GUNMETAL = HALEHOUND_GUNMETAL;
+#define SHREDDY_TEAL    HALEHOUND_CYAN
+#define SHREDDY_PINK    HALEHOUND_MAGENTA
+#define SHREDDY_BLACK   HALEHOUND_BLACK
+#define SHREDDY_BLUE    HALEHOUND_CYAN
+#define SHREDDY_PURPLE  HALEHOUND_VIOLET
+#define SHREDDY_GREEN   HALEHOUND_GREEN
+#define SHREDDY_GUNMETAL HALEHOUND_GUNMETAL
 
 // Standard colors
-const uint16_t ORANGE = HALEHOUND_MAGENTA;   // Use magenta instead of orange
+#define ORANGE          HALEHOUND_MAGENTA
 const uint16_t GRAY = 0x8410;
-const uint16_t BLUE = HALEHOUND_CYAN;
+#define BLUE            HALEHOUND_CYAN
 const uint16_t RED = 0xF800;
-const uint16_t GREEN = HALEHOUND_GREEN;
+#define GREEN           HALEHOUND_GREEN
 const uint16_t BLACK = 0x0000;
 const uint16_t WHITE = 0xFFFF;
 const uint16_t LIGHT_GRAY = 0xC618;

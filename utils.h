@@ -122,6 +122,9 @@ void loadSettings();
 // Apply BGR/RGB color order to display
 void applyColorOrder();
 
+// Apply color mode palette (0=Default, 1=Colorblind, 2=High Contrast)
+void applyColorMode(uint8_t mode);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DEBUG HELPERS
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HaleHound-CYD Main Firmware
 // ESP32 Cheap Yellow Display Edition
-// Matches ESP32-DIV HaleHound v2.6.0 EXACTLY
+// Matches ESP32-DIV HaleHound v2.6.2 EXACTLY
 // Created: 2026-02-06
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -211,13 +211,14 @@ const unsigned char *tools_submenu_icons[tools_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_go_back
 };
 
-// Settings Submenu - 7 items
-const int settings_NUM_SUBMENU_ITEMS = 7;
+// Settings Submenu - 8 items
+const int settings_NUM_SUBMENU_ITEMS = 8;
 const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
     "Brightness",
     "Screen Timeout",
     "Swap Colors",
     "Invert Display",
+    "Color Mode",
     "Rotation",
     "Device Info",
     "Back to Main Menu"
@@ -226,6 +227,7 @@ const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
 const unsigned char *settings_submenu_icons[settings_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_eye2,
+    bitmap_icon_led,
     bitmap_icon_led,
     bitmap_icon_led,
     bitmap_icon_follow,
@@ -254,6 +256,7 @@ int screen_timeout_seconds = 60;
 bool screen_asleep = false;
 bool color_order_rgb = false;  // false = BGR (default), true = RGB (swapped panels)
 bool display_inverted = false; // false = normal, true = inverted (for 2USB/inverted panels)
+uint8_t color_mode = 0;       // 0 = Default, 1 = Colorblind, 2 = High Contrast
 uint8_t screen_rotation = 0;  // 0 = Standard (USB down), 2 = Flipped 180 (USB up)
 
 // Timeout option tables
@@ -1405,6 +1408,84 @@ void invertDisplayLoop() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// COLOR MODE SELECTOR
+// 3 palettes: Default (pink/purple), Colorblind (blue/yellow), Hi-Contrast
+// ═══════════════════════════════════════════════════════════════════════════
+
+void colorModeScreen() {
+    tft.fillScreen(TFT_BLACK);
+    drawStatusBar();
+    drawInoIconBar();
+
+    drawGlitchTitle(60, "COLORS");
+
+    // Current mode name in rounded rect
+    tft.drawRoundRect(20, 95, 200, 50, 6, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    const char* modeNames[] = {"DEFAULT", "COLORBLIND", "HI-CONTRAST"};
+    const char* modeName = (color_mode < 3) ? modeNames[color_mode] : modeNames[0];
+    int nameLen = strlen(modeName);
+    int nameX = (240 - nameLen * 12) / 2;
+    tft.setCursor(nameX, 108);
+    tft.print(modeName);
+
+    // Color preview strip — 6 swatches showing the active theme
+    int swatchW = 30;
+    int swatchH = 20;
+    int swatchY = 155;
+    int swatchStartX = 10;
+    uint16_t swatches[] = {HALEHOUND_MAGENTA, HALEHOUND_HOTPINK, HALEHOUND_BRIGHT,
+                           HALEHOUND_VIOLET, HALEHOUND_CYAN, HALEHOUND_GREEN};
+    for (int i = 0; i < 6; i++) {
+        int sx = swatchStartX + i * (swatchW + 7);
+        tft.fillRect(sx, swatchY, swatchW, swatchH, swatches[i]);
+        tft.drawRect(sx, swatchY, swatchW, swatchH, HALEHOUND_GUNMETAL);
+    }
+
+    // Description
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(20, 185);
+    tft.print("Tap NEXT to cycle modes.");
+    tft.setCursor(20, 197);
+    tft.print("Changes apply instantly.");
+
+    // NEXT button
+    tft.fillRect(50, 225, 140, 45, HALEHOUND_DARK);
+    tft.drawRect(50, 225, 140, 45, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_CYAN);
+    tft.setCursor(80, 238);
+    tft.print("NEXT");
+}
+
+void colorModeLoop() {
+    colorModeScreen();
+
+    while (!feature_exit_requested) {
+        touchButtonsUpdate();
+
+        if (isInoBackTapped() || buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+            feature_exit_requested = true;
+            saveSettings();
+            break;
+        }
+
+        // NEXT button — cycle through 3 modes
+        if (isTouchInArea(50, 225, 140, 45)) {
+            color_mode = (color_mode + 1) % 3;
+            applyColorMode(color_mode);
+            saveSettings();
+            colorModeScreen();
+            delay(300);
+        }
+
+        delay(50);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ROTATION CONTROL
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1728,7 +1809,7 @@ void displayDeviceInfo() {
 
     tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
     y += 18;
-    tft.setCursor(10, y); tft.print("Version: v2.6.0 CYD Edition");
+    tft.setCursor(10, y); tft.print("Version: v2.6.2 CYD Edition");
     y += 18;
     tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
     y += 18;
@@ -1782,7 +1863,7 @@ void displayDeviceInfo() {
                 y = 75;
                 tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
                 y += 18;
-                tft.setCursor(10, y); tft.print("Version: v2.6.0 CYD Edition");
+                tft.setCursor(10, y); tft.print("Version: v2.6.2 CYD Edition");
                 y += 18;
                 tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
                 y += 18;
@@ -1825,7 +1906,7 @@ void handleSettingsSubmenuTouch() {
             displaySubmenu();
             delay(200);
 
-            if (current_submenu_index == 6) { // Back
+            if (current_submenu_index == 7) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -1846,10 +1927,13 @@ void handleSettingsSubmenuTouch() {
                 case 3: // Invert Display
                     invertDisplayLoop();
                     break;
-                case 4: // Rotation
+                case 4: // Color Mode
+                    colorModeLoop();
+                    break;
+                case 5: // Rotation
                     rotationControlLoop();
                     break;
-                case 5: // Device Info
+                case 6: // Device Info
                     displayDeviceInfo();
                     break;
             }
@@ -1889,7 +1973,7 @@ void handleAboutPage() {
     drawGlitchStatus(80, "CYD Edition", HALEHOUND_CYAN);
 
     // Version centered
-    drawCenteredText(90, "v2.6.0", HALEHOUND_VIOLET, 1);
+    drawCenteredText(90, "v2.6.2", HALEHOUND_VIOLET, 1);
 
     // Separator
     tft.drawLine(20, 100, SCREEN_WIDTH - 20, 100, HALEHOUND_VIOLET);
@@ -2059,7 +2143,7 @@ void showSplash() {
 
     // Version
     tft.setTextSize(1);
-    drawCenteredText(130, "v2.6.0", HALEHOUND_HOTPINK, 1);
+    drawCenteredText(130, "v2.6.2", HALEHOUND_HOTPINK, 1);
 
     // Board info
     drawCenteredText(140, CYD_BOARD_NAME, HALEHOUND_HOTPINK, 1);
@@ -2268,7 +2352,7 @@ void setup() {
 
     Serial.println();
     Serial.println("===============================================");
-    Serial.println("        HALEHOUND-CYD FIRMWARE v2.6.0");
+    Serial.println("        HALEHOUND-CYD FIRMWARE v2.6.2");
     Serial.println("        " CYD_BOARD_NAME);
     Serial.println("===============================================");
     Serial.println();
@@ -2303,9 +2387,10 @@ void setup() {
 
     // Touch test available via runTouchTest() if needed for recalibration
 
-    // Load settings from EEPROM (brightness, timeout, color order, rotation, touch cal)
+    // Load settings from EEPROM (brightness, timeout, color order, rotation, touch cal, color mode)
     loadSettings();
     ledcWrite(0, brightness_level);
+    applyColorMode(color_mode);
 
     // Apply saved rotation — must happen before applyColorOrder (which needs correct MADCTL base)
     if (screen_rotation != 0) {
