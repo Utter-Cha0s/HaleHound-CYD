@@ -444,6 +444,27 @@ void cleanup();
 }  // namespace StationScan
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AUTH FLOOD - 802.11 Authentication Frame Flood Attack
+// Overwhelms AP client table with fake auth requests from random MACs
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace AuthFlood {
+
+// Initialize auth flood module
+void setup();
+
+// Main loop function
+void loop();
+
+// Check if user requested exit
+bool isExitRequested();
+
+// Cleanup and release WiFi
+void cleanup();
+
+}  // namespace AuthFlood
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SHARED WIFI UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════
 

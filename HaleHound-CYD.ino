@@ -93,8 +93,8 @@ const unsigned char *bitmap_icons[NUM_MENU_ITEMS] = {
     bitmap_icon_skull_about
 };
 
-// WiFi Submenu - 8 items
-const int NUM_SUBMENU_ITEMS = 8;
+// WiFi Submenu - 9 items
+const int NUM_SUBMENU_ITEMS = 9;
 const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Packet Monitor",
     "Beacon Spammer",
@@ -103,6 +103,7 @@ const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "WiFi Scanner",
     "Captive Portal",
     "Station Scanner",
+    "Auth Flood",
     "Back to Main Menu"
 };
 
@@ -114,6 +115,7 @@ const unsigned char *wifi_submenu_icons[NUM_SUBMENU_ITEMS] = {
     bitmap_icon_jammer,
     bitmap_icon_bash,
     bitmap_icon_graph,
+    bitmap_icon_nuke,
     bitmap_icon_go_back
 };
 
@@ -552,7 +554,7 @@ void handleWiFiSubmenuTouch() {
             delay(200);
 
             // Execute selected item
-            if (current_submenu_index == 7) { // Back
+            if (current_submenu_index == 8) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -696,6 +698,17 @@ void handleWiFiSubmenuTouch() {
                     } else {
                         StationScan::cleanup();
                     }
+                    break;
+                case 7: // Auth Flood
+                    AuthFlood::setup();
+                    while (!feature_exit_requested) {
+                        AuthFlood::loop();
+                        if (AuthFlood::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    AuthFlood::cleanup();
                     break;
             }
 
