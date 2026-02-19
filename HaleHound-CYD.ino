@@ -211,12 +211,13 @@ const unsigned char *tools_submenu_icons[tools_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_go_back
 };
 
-// Settings Submenu - 6 items
-const int settings_NUM_SUBMENU_ITEMS = 6;
+// Settings Submenu - 7 items
+const int settings_NUM_SUBMENU_ITEMS = 7;
 const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
     "Brightness",
     "Screen Timeout",
     "Swap Colors",
+    "Invert Display",
     "Rotation",
     "Device Info",
     "Back to Main Menu"
@@ -225,6 +226,7 @@ const char *settings_submenu_items[settings_NUM_SUBMENU_ITEMS] = {
 const unsigned char *settings_submenu_icons[settings_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_eye2,
+    bitmap_icon_led,
     bitmap_icon_led,
     bitmap_icon_follow,
     bitmap_icon_stat,
@@ -251,6 +253,7 @@ int brightness_level = 255;
 int screen_timeout_seconds = 60;
 bool screen_asleep = false;
 bool color_order_rgb = false;  // false = BGR (default), true = RGB (swapped panels)
+bool display_inverted = false; // false = normal, true = inverted (for 2USB/inverted panels)
 uint8_t screen_rotation = 0;  // 0 = Standard (USB down), 2 = Flipped 180 (USB up)
 
 // Timeout option tables
@@ -427,7 +430,7 @@ void displayMenu() {
         tft.fillScreen(TFT_BLACK);
 
         // Flaming skulls watermark - pushed down behind menu
-        tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x0082);  // Dark cyan watermark
+        tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x2945);  // Dark cyan watermark
 
         // Draw menu buttons
         for (int i = 0; i < NUM_MENU_ITEMS; i++) {
@@ -1335,6 +1338,73 @@ void colorSwapLoop() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// INVERT DISPLAY CONTROL
+// ═══════════════════════════════════════════════════════════════════════════
+
+void displayInvertScreen() {
+    tft.fillScreen(TFT_BLACK);
+    drawStatusBar();
+    drawInoIconBar();
+
+    drawGlitchTitle(60, "INVERT");
+
+    // Current mode display
+    tft.drawRoundRect(20, 95, 200, 50, 6, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    if (display_inverted) {
+        tft.setCursor(52, 108);
+        tft.print("INVERTED");
+    } else {
+        tft.setCursor(52, 108);
+        tft.print("NORMAL *");
+    }
+
+    // Description
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_GUNMETAL);
+    tft.setCursor(20, 160);
+    tft.print("If colors are washed out or");
+    tft.setCursor(20, 172);
+    tft.print("inverted, tap TOGGLE.");
+    tft.setCursor(20, 192);
+    tft.print("* = default for most boards");
+
+    // Toggle button
+    tft.fillRect(50, 225, 140, 45, HALEHOUND_DARK);
+    tft.drawRect(50, 225, 140, 45, HALEHOUND_CYAN);
+    tft.setTextSize(2);
+    tft.setTextColor(HALEHOUND_CYAN);
+    tft.setCursor(65, 238);
+    tft.print("TOGGLE");
+}
+
+void invertDisplayLoop() {
+    displayInvertScreen();
+
+    while (!feature_exit_requested) {
+        touchButtonsUpdate();
+
+        if (isInoBackTapped() || buttonPressed(BTN_BACK) || buttonPressed(BTN_BOOT)) {
+            feature_exit_requested = true;
+            saveSettings();
+            break;
+        }
+
+        // Toggle button
+        if (isTouchInArea(50, 225, 140, 45)) {
+            display_inverted = !display_inverted;
+            tft.invertDisplay(display_inverted);
+            saveSettings();
+            displayInvertScreen();
+            delay(300);
+        }
+
+        delay(50);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ROTATION CONTROL
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1755,7 +1825,7 @@ void handleSettingsSubmenuTouch() {
             displaySubmenu();
             delay(200);
 
-            if (current_submenu_index == 5) { // Back
+            if (current_submenu_index == 6) { // Back
                 returnToMainMenu();
                 return;
             }
@@ -1773,10 +1843,13 @@ void handleSettingsSubmenuTouch() {
                 case 2: // Swap Colors
                     colorSwapLoop();
                     break;
-                case 3: // Rotation
+                case 3: // Invert Display
+                    invertDisplayLoop();
+                    break;
+                case 4: // Rotation
                     rotationControlLoop();
                     break;
-                case 4: // Device Info
+                case 5: // Device Info
                     displayDeviceInfo();
                     break;
             }
@@ -1797,7 +1870,7 @@ void handleAboutPage() {
     tft.fillScreen(TFT_BLACK);
 
     // Skull watermark — dark cyan, same as my splash screen
-    tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x0082);
+    tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x2945);
 
     // My double border — HaleHound signature
     tft.drawRect(2, 2, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 4, HALEHOUND_VIOLET);
@@ -1976,7 +2049,7 @@ void showSplash() {
     tft.drawRect(4, 4, SCREEN_WIDTH - 8, SCREEN_HEIGHT - 8, HALEHOUND_MAGENTA);
 
     // Skull splatter watermark - full screen
-    tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x0082);  // Dark cyan watermark
+    tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x2945);  // Dark cyan watermark (brightened for all panel variants)
 
     // Title — glitch effect
     drawGlitchTitle(80, "HALEHOUND");
@@ -1986,14 +2059,14 @@ void showSplash() {
 
     // Version
     tft.setTextSize(1);
-    drawCenteredText(130, "v2.6.0", HALEHOUND_VIOLET, 1);
+    drawCenteredText(130, "v2.6.0", HALEHOUND_HOTPINK, 1);
 
     // Board info
-    drawCenteredText(140, CYD_BOARD_NAME, HALEHOUND_VIOLET, 1);
+    drawCenteredText(140, CYD_BOARD_NAME, HALEHOUND_HOTPINK, 1);
 
     // Credits
-    drawCenteredText(SCREEN_HEIGHT - 40, "by JesseCHale", HALEHOUND_GUNMETAL, 1);
-    drawCenteredText(SCREEN_HEIGHT - 25, "github.com/JesseCHale", HALEHOUND_GUNMETAL, 1);
+    drawCenteredText(SCREEN_HEIGHT - 40, "by JesseCHale", HALEHOUND_VIOLET, 1);
+    drawCenteredText(SCREEN_HEIGHT - 25, "github.com/JesseCHale", HALEHOUND_VIOLET, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2203,6 +2276,7 @@ void setup() {
     // Initialize display
     tft.init();
     tft.setRotation(0);  // Portrait mode — keeps 240x320 coordinate space
+    tft.invertDisplay(false);  // Normalize panel inversion before drawing anything
     tft.fillScreen(HALEHOUND_BLACK);
 
     // Turn on backlight with PWM
@@ -2239,6 +2313,9 @@ void setup() {
         Serial.printf("[INIT] Rotation set to %d\n", screen_rotation);
     }
     applyColorOrder();
+    if (display_inverted) {
+        tft.invertDisplay(true);
+    }
     Serial.println("[INIT] Settings loaded");
 
     // Auto-trigger touch calibration on first boot (uncalibrated board)

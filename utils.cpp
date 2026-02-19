@@ -320,12 +320,13 @@ String getElapsedTimeString(uint32_t startMillis) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define EEPROM_SIZE 512
-#define EEPROM_MAGIC 0xCD05   // Bumped from 0xCD04 — added rotation field
+#define EEPROM_MAGIC 0xCD06   // Bumped from 0xCD05 — added display inversion field
 
 // Globals defined in HaleHound-CYD.ino
 extern int brightness_level;
 extern int screen_timeout_seconds;
 extern bool color_order_rgb;
+extern bool display_inverted;
 extern TFT_eSPI tft;
 
 struct Settings {
@@ -342,6 +343,7 @@ struct Settings {
     uint16_t screenTimeout;
     uint8_t colorSwap;         // 0 = BGR (default), 1 = RGB
     uint8_t rotation;          // TFT rotation: 0 = Standard, 2 = Flipped 180
+    uint8_t displayInverted;   // 0 = normal, 1 = inverted (for 2USB/inverted panels)
 };
 
 static Settings settings;
@@ -366,6 +368,7 @@ void saveSettings() {
     settings.touchYMin = touch_cal_y_min;
     settings.touchYMax = touch_cal_y_max;
     settings.rotation = screen_rotation;
+    settings.displayInverted = display_inverted ? 1 : 0;
 
     EEPROM.begin(EEPROM_SIZE);
     EEPROM.put(0, settings);
@@ -398,6 +401,7 @@ void loadSettings() {
         settings.screenTimeout = 60;
         settings.colorSwap = 0;
         settings.rotation = 0;         // Standard portrait (USB down)
+        settings.displayInverted = 0;  // Normal (no inversion)
 
         #if CYD_DEBUG
         Serial.println("[UTILS] No valid settings found, using defaults");
@@ -407,6 +411,7 @@ void loadSettings() {
         brightness_level = settings.brightness;
         screen_timeout_seconds = settings.screenTimeout;
         color_order_rgb = (settings.colorSwap == 1);
+        display_inverted = (settings.displayInverted == 1);
 
         // Apply rotation to global
         extern uint8_t screen_rotation;

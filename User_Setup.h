@@ -21,8 +21,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 #ifdef CYD_28
-  // 2.8" CYD uses ILI9341
-  #define ILI9341_DRIVER
+  // 2.8" CYD uses ILI9341 variant 2 (handles more panel revisions correctly)
+  #define ILI9341_2_DRIVER
   #define TFT_WIDTH  240
   #define TFT_HEIGHT 320
   #define CYD_BOARD_NAME "CYD 2.8\" (ESP32-2432S028)"
@@ -112,7 +112,7 @@
 
 // Display SPI frequency
 #ifdef CYD_28
-  #define SPI_FREQUENCY  55000000  // 55MHz for ILI9341
+  #define SPI_FREQUENCY  40000000  // 40MHz — matches Bruce, works on all CYD panel variants
 #endif
 #ifdef CYD_35
   #define SPI_FREQUENCY  40000000  // 40MHz for ST7796 (more conservative)
@@ -122,7 +122,7 @@
 #define SPI_TOUCH_FREQUENCY  2500000  // 2.5MHz
 
 // Read frequency
-#define SPI_READ_FREQUENCY  20000000
+#define SPI_READ_FREQUENCY  16000000  // 16MHz — matches Bruce, safer for all panel variants
 
 // Use HSPI port for display
 #define USE_HSPI_PORT
