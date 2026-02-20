@@ -44,7 +44,7 @@
 
 **ESP32-DIV HaleHound Edition for Cheap Yellow Display**
 
-Version **v2.6.2 CYD Edition** | By [JesseCHale](https://github.com/JesseCHale)
+Version **v2.7.0 CYD Edition** | By [JesseCHale](https://github.com/JesseCHale)
 
 ---
 
@@ -247,7 +247,7 @@ The MicroSD slot is **built into the CYD board** on the back. No external wiring
 ## Menu Tree
 
 ```
-HALEHOUND-CYD v2.6.2
+HALEHOUND-CYD v2.7.0
 │
 ├── WiFi ──────────────────────────────────────────────────
 │   ├── Packet Monitor ......... Real-time 802.11 frame capture
@@ -257,6 +257,7 @@ HALEHOUND-CYD v2.6.2
 │   ├── WiFi Scanner ........... Scan APs → Tap-to-Deauth/Clone
 │   ├── Captive Portal ......... GARMR Evil Twin credential harvest
 │   ├── Station Scanner ........ Enumerate connected clients
+│   ├── Auth Flood ............. 802.11 auth frame flood attack
 │   └── Back to Main Menu
 │
 ├── Bluetooth ─────────────────────────────────────────────
@@ -265,6 +266,8 @@ HALEHOUND-CYD v2.6.2
 │   ├── BLE Beacon ............. Broadcast custom BLE beacons
 │   ├── Sniffer ................ Passive BLE traffic analysis
 │   ├── BLE Scanner ............ Discover nearby BLE devices
+│   ├── WhisperPair ............ CVE-2025-36911 Fast Pair scanner
+│   ├── AirTag Detect .......... Apple FindMy tracker detection
 │   └── Back to Main Menu
 │
 ├── 2.4GHz (NRF24) ───────────────────────────────────────
@@ -294,6 +297,7 @@ HALEHOUND-CYD v2.6.2
 │   ├── Update Firmware ........ Flash .bin from SD card
 │   ├── Touch Calibrate ........ Touchscreen recalibration
 │   ├── GPS .................... Live satellite view & NMEA data
+│   ├── Radio Test ............. SPI radio hardware verification
 │   └── Back to Main Menu
 │
 ├── Settings ──────────────────────────────────────────────
@@ -417,6 +421,29 @@ Standalone captive portal that creates a fake AP and captures credentials. Serve
 
 Scans for connected clients (stations) on nearby networks. Shows client MAC, associated AP, and RSSI. Supports deauth handoff to disconnect selected clients.
 
+#### Auth Flood
+
+Overwhelms a target AP's client table by flooding it with 802.11 authentication frames from random MAC addresses. Scan for nearby access points, tap to select a target, then flood.
+
+```
+┌──────────────────────────────────────────────┐
+│  ATTACK FLOW                                 │
+│                                              │
+│  1. Scan networks (esp_wifi_scan_start)      │
+│  2. Display AP list with RSSI bars           │
+│  3. User taps target AP                      │
+│  4. Switch to target's channel               │
+│  5. Validate TX with test auth frame         │
+│  6. Flood auth frames from random MACs       │
+│  7. 85-bar equalizer shows attack rhythm     │
+│                                              │
+│  REQUIRES: WIFI_MODE_APSTA                   │
+│  Raw frame TX needs an active AP interface.  │
+└──────────────────────────────────────────────┘
+```
+
+**Target Scenario:** Force AP to exhaust its association table, causing legitimate clients to be unable to connect. Effective against consumer routers with small client table limits.
+
 ---
 
 ### Bluetooth Attacks
@@ -442,6 +469,43 @@ Passive BLE traffic analyzer. Displays advertisement data, RSSI, device names, a
 #### BLE Scanner
 
 Discovery tool that lists all nearby BLE devices with their names, MAC addresses, RSSI, and advertised services.
+
+#### WhisperPair — CVE-2025-36911 Fast Pair Vulnerability Scanner
+
+Scans for Google Fast Pair devices and probes for the WhisperPair vulnerability (CVE-2025-36911). Discovers Fast Pair service advertisements, then connects via GATT to check if the Key-Based Pairing characteristic is accessible outside of pairing mode — a condition that allows unauthorized pairing.
+
+```
+┌──────────────────────────────────────────────┐
+│  ATTACK FLOW                                 │
+│                                              │
+│  1. BLE scan for Fast Pair service UUID      │
+│  2. Filter devices with Fast Pair adverts    │
+│  3. Connect to target via GATT               │
+│  4. Probe Key-Based Pairing characteristic   │
+│  5. Report: VULNERABLE / PATCHED / UNKNOWN   │
+│                                              │
+│  Passive discovery, active GATT probe.       │
+└──────────────────────────────────────────────┘
+```
+
+#### AirTag Detect — Apple FindMy Tracker Detection
+
+Passive BLE scanner that detects AirTags, FindMy accessories, and compatible third-party trackers. Filters for Apple manufacturer data (0x4C) with FindMy type bytes (0x12/0x19). Displays MAC address, RSSI proximity bars, battery level estimate, distance calculation, and status byte for each detected tracker. Auto-rescans every 5 seconds with alert flash on new tracker detection. Tracks up to 20 unique devices simultaneously.
+
+```
+┌──────────────────────────────────────────────┐
+│  DETECTION METHOD                            │
+│                                              │
+│  1. BLE scan for Apple manufacturer data     │
+│  2. Filter: company ID 0x004C (Apple)        │
+│  3. Match FindMy type: 0x12 or 0x19          │
+│  4. Extract status byte and battery level    │
+│  5. Calculate distance from RSSI             │
+│  6. Track unique MACs (up to 20)             │
+│  7. Alert flash on new tracker detection     │
+│  8. Auto-rescan every 5 seconds              │
+└──────────────────────────────────────────────┘
+```
 
 **BLE Radio Notes:**
 - Always use `BLEDevice::deinit(false)` — `deinit(true)` has a bug that breaks reinit
@@ -633,6 +697,10 @@ Interactive 4-corner touchscreen calibration tool. Tap crosshairs at each corner
 #### GPS
 
 Live GPS satellite view with NMEA data parsing via TinyGPSPlus. Displays satellite count, fix status, latitude, longitude, altitude, speed, and HDOP. Auto-scans GPIO 3 (P1 connector) at 9600 baud.
+
+#### Radio Test
+
+Interactive SPI hardware verification tool for NRF24L01+ and CC1101 radios. Tests SPI communication by reading chip identification registers (NRF24 CONFIG register 0x08, CC1101 VERSION register 0x14) and provides smart failure diagnostics — distinguishes between wiring issues, dead chips, and clone chip detection. Includes battery voltage readout and 4-page wiring block diagrams with KiCad-style layout showing colored trace lines, solder dots, and chip boxes for NRF24, GPS, and CC1101 connections.
 
 ---
 
@@ -991,6 +1059,7 @@ HaleHound-CYD/
 ├── wardriving_screen.cpp/h .... Wardriving display and UI
 ├── saved_captures.cpp/h ....... Browse saved handshakes on SD
 │
+├── radio_test.cpp/h ........... SPI radio diagnostics + wiring diagrams
 ├── gps_module.cpp/h ........... GPS setup, NMEA parsing, display
 ├── gps.h ...................... GPS type definitions
 ├── serial_monitor.cpp/h ....... UART passthrough terminal

@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HaleHound-CYD Main Firmware
 // ESP32 Cheap Yellow Display Edition
-// Matches ESP32-DIV HaleHound v2.6.2 EXACTLY
+// Matches ESP32-DIV HaleHound v2.7.0 EXACTLY
 // Created: 2026-02-06
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -1858,7 +1858,7 @@ void displayDeviceInfo() {
 
     tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
     y += 18;
-    tft.setCursor(10, y); tft.print("Version: v2.6.2 CYD Edition");
+    tft.setCursor(10, y); tft.print("Version: v2.7.0 CYD Edition");
     y += 18;
     tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
     y += 18;
@@ -1912,7 +1912,7 @@ void displayDeviceInfo() {
                 y = 75;
                 tft.setCursor(10, y); tft.print("Device: HaleHound-CYD");
                 y += 18;
-                tft.setCursor(10, y); tft.print("Version: v2.6.2 CYD Edition");
+                tft.setCursor(10, y); tft.print("Version: v2.7.0 CYD Edition");
                 y += 18;
                 tft.setCursor(10, y); tft.print("By: HaleHound (JMFH)");
                 y += 18;
@@ -2022,7 +2022,7 @@ void handleAboutPage() {
     drawGlitchStatus(80, "CYD Edition", HALEHOUND_MAGENTA);
 
     // Version centered
-    drawCenteredText(90, "v2.6.2", HALEHOUND_VIOLET, 1);
+    drawCenteredText(90, "v2.7.0", HALEHOUND_VIOLET, 1);
 
     // Separator
     tft.drawLine(20, 100, SCREEN_WIDTH - 20, 100, HALEHOUND_VIOLET);
@@ -2192,7 +2192,7 @@ void showSplash() {
 
     // Version
     tft.setTextSize(1);
-    drawCenteredText(130, "v2.6.2", HALEHOUND_HOTPINK, 1);
+    drawCenteredText(130, "v2.7.0", HALEHOUND_HOTPINK, 1);
 
     // Board info
     drawCenteredText(140, CYD_BOARD_NAME, HALEHOUND_HOTPINK, 1);
@@ -2401,7 +2401,7 @@ void setup() {
 
     Serial.println();
     Serial.println("===============================================");
-    Serial.println("        HALEHOUND-CYD FIRMWARE v2.6.2");
+    Serial.println("        HALEHOUND-CYD FIRMWARE v2.7.0");
     Serial.println("        " CYD_BOARD_NAME);
     Serial.println("===============================================");
     Serial.println();

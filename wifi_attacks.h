@@ -206,7 +206,7 @@ namespace DeauthDetect {
 // ═══════════════════════════════════════════════════════════════════════════
 // PROBE REQUEST SNIFFER v2.0
 // Captures devices broadcasting probe requests for networks
-// HaleHound v2.6.2 - Added Evil Twin spawn, Filter View, Save Targets
+// HaleHound v2.7.0 - Added Evil Twin spawn, Filter View, Save Targets
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Initialize probe sniffer module
