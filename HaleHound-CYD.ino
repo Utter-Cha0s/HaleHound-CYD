@@ -1064,8 +1064,8 @@ void handleSIGINTSubmenuTouch() {
                         EapolCapture::loop();
                         if (EapolCapture::isExitRequested()) feature_exit_requested = true;
                         if (digitalRead(0) == LOW) feature_exit_requested = true;
-                        touchButtonsUpdate();
-                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        // No external isBackButtonTapped() — EAPOL handles its own
+                        // back navigation internally (CAPTURE→SCAN→EXIT)
                     }
                     EapolCapture::cleanup();
                     break;
