@@ -2,7 +2,7 @@
 // HaleHound-CYD Radio Test Tool
 // Interactive SPI radio hardware verification (NRF24L01+ and CC1101)
 // Tap a radio name to run its test. Results show inline as PASS/FAIL.
-// Includes wiring reference and battery voltage check.
+// Includes wiring reference diagrams.
 // Created: 2026-02-19
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -32,8 +32,7 @@ extern void drawInoIconBar();
 // CC1101 button:  Y=140..163
 // CC1101 status:  Y=165 (two lines)
 // Wiring button:  Y=200..223
-// Battery line:   Y=230
-// Hint:           Y=260
+// Hint:           Y=230
 
 #define RT_NRF_BTN_Y     SCALE_Y(85)
 #define RT_NRF_BTN_H     SCALE_H(23)
@@ -45,8 +44,7 @@ extern void drawInoIconBar();
 #define RT_CC_HINT_Y     SCALE_Y(177)
 #define RT_WIRE_BTN_Y    SCALE_Y(200)
 #define RT_WIRE_BTN_H    SCALE_H(23)
-#define RT_BATT_Y        SCALE_Y(230)
-#define RT_HINT_Y        SCALE_Y(260)
+#define RT_HINT_Y        SCALE_Y(230)
 #define RT_BTN_X          10
 #define RT_BTN_W         (SCREEN_WIDTH - 20)
 
@@ -122,37 +120,6 @@ static void rawNrfWrite(byte reg, byte val) {
     SPI.transfer((reg & 0x1F) | 0x20);  // W_REGISTER command
     SPI.transfer(val);
     digitalWrite(NRF24_CSN, HIGH);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// BATTERY VOLTAGE
-// ═══════════════════════════════════════════════════════════════════════════
-
-static void readAndDrawBattery() {
-    // GPIO34 = LDR/Battery ADC pin (input only, 12-bit)
-    // With 2:1 voltage divider: actual_V = (adc / 4095) * 3.3 * 2
-    int raw = analogRead(BATTERY_ADC_PIN);
-    float voltage = (raw / 4095.0f) * 3.3f * BATTERY_DIVIDER;
-
-    char msg[48];
-    uint16_t color;
-
-    if (raw < 100) {
-        // No divider connected — ADC floating or no battery
-        snprintf(msg, sizeof(msg), "Battery: no divider (ADC=%d)", raw);
-        color = HALEHOUND_GUNMETAL;
-    } else if (voltage < 3.3f) {
-        snprintf(msg, sizeof(msg), "Battery: %.2fV LOW! (ADC=%d)", voltage, raw);
-        color = TFT_RED;
-    } else if (voltage < 3.6f) {
-        snprintf(msg, sizeof(msg), "Battery: %.2fV warn (ADC=%d)", voltage, raw);
-        color = TFT_YELLOW;
-    } else {
-        snprintf(msg, sizeof(msg), "Battery: %.2fV OK (ADC=%d)", voltage, raw);
-        color = TFT_GREEN;
-    }
-
-    drawStatusLine(RT_BATT_Y, msg, color);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -240,7 +207,9 @@ static void runCC1101Test(int statusY, int hintY) {
 
     if (!detected) {
         drawStatusLine(statusY, "FAIL  No SPI response", TFT_RED);
-        drawStatusLine(hintY, "Check CS (GPIO 27) and 3.3V power", TFT_YELLOW);
+        char hint[48];
+        snprintf(hint, sizeof(hint), "Check CS (GPIO %d) and 3.3V power", CC1101_CS);
+        drawStatusLine(hintY, hint, TFT_YELLOW);
         return;
     }
 
@@ -451,7 +420,7 @@ static void drawNrf24Diagram() {
     int noteY = boxY + boxH + 6;
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.setCursor(5, noteY);
-    tft.print("3.3V+GND from CN1 (IO22/IO27 plug)");
+    { char cnNote[48]; snprintf(cnNote, sizeof(cnNote), "3.3V+GND from CN1 (IO22/IO%d plug)", CC1101_CS); tft.print(cnNote); }
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
     tft.setCursor(5, noteY + 14);
     tft.print("No cap needed from this source!");
@@ -542,7 +511,9 @@ static void drawCC1101Diagram() {
     int py = boxY + 20;
     drawPinTrace(py, "3.3V",  "VCC",     TFT_RED,           false);  py += pinSpace;
     drawPinTrace(py, "GND",   "GND",     TFT_WHITE,         false);  py += pinSpace;
-    drawPinTrace(py, "IO27",  "CS",      HALEHOUND_MAGENTA, false);  py += pinSpace;
+    char csLabel[8];
+    snprintf(csLabel, sizeof(csLabel), "IO%d", CC1101_CS);
+    drawPinTrace(py, csLabel,  "CS",      HALEHOUND_MAGENTA, false);  py += pinSpace;
     drawPinTrace(py, "IO18",  "SCK",     TFT_CYAN,          false);  py += pinSpace;
     drawPinTrace(py, "IO23",  "MOSI",    TFT_CYAN,          false);  py += pinSpace;
     drawPinTrace(py, "IO19",  "MISO",    TFT_CYAN,          false);  py += pinSpace;
@@ -553,7 +524,7 @@ static void drawCC1101Diagram() {
     int noteY = boxY + boxH + 6;
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.setCursor(5, noteY);
-    tft.print("3.3V+GND from CN1 (IO22/IO27 plug)");
+    { char cnNote[48]; snprintf(cnNote, sizeof(cnNote), "3.3V+GND from CN1 (IO22/IO%d plug)", CC1101_CS); tft.print(cnNote); }
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
     tft.setCursor(5, noteY + 14);
     tft.print("No cap needed from this source!");
@@ -631,9 +602,6 @@ static void drawMainScreen() {
     // Wiring reference button
     drawRadioButton(RT_WIRE_BTN_Y, RT_WIRE_BTN_H, "[ WIRING ]", HALEHOUND_HOTPINK);
 
-    // Battery voltage
-    readAndDrawBattery();
-
     // Hint
     drawCenteredText(RT_HINT_Y, "Tap radio to test", HALEHOUND_HOTPINK, 1);
 }
@@ -660,10 +628,8 @@ void radioTestScreen() {
 
             runNrfTest(RT_NRF_STATUS_Y, RT_NRF_HINT_Y);
 
-            // Update hint and refresh battery after SPI activity
             tft.fillRect(0, RT_HINT_Y, SCREEN_WIDTH, 14, TFT_BLACK);
             drawCenteredText(RT_HINT_Y, "Tap again to re-test", HALEHOUND_GUNMETAL, 1);
-            readAndDrawBattery();
 
             delay(300);  // Debounce
         }
@@ -678,7 +644,6 @@ void radioTestScreen() {
 
             tft.fillRect(0, RT_HINT_Y, SCREEN_WIDTH, 14, TFT_BLACK);
             drawCenteredText(RT_HINT_Y, "Tap again to re-test", HALEHOUND_GUNMETAL, 1);
-            readAndDrawBattery();
 
             delay(300);  // Debounce
         }

@@ -46,6 +46,7 @@
 #include "saved_captures.h"
 #include "radio_test.h"
 #include "iot_recon.h"
+#include "rfid_attacks.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GLOBAL OBJECTS
@@ -72,12 +73,13 @@ unsigned long last_interaction_time = 0;
 // MENU DEFINITIONS - EXACT MATCH TO ORIGINAL ESP32-DIV
 // ═══════════════════════════════════════════════════════════════════════════
 
-const int NUM_MENU_ITEMS = 8;
+const int NUM_MENU_ITEMS = 9;
 const char *menu_items[NUM_MENU_ITEMS] = {
     "WiFi",
     "Bluetooth",
     "2.4GHz",
     "SubGHz",
+    "RFID",
     "SIGINT",
     "Tools",
     "Setting",
@@ -89,6 +91,7 @@ const unsigned char *bitmap_icons[NUM_MENU_ITEMS] = {
     bitmap_icon_skull_bluetooth,
     bitmap_icon_skull_jammer,
     bitmap_icon_skull_subghz,
+    bitmap_icon_skull_rfid,
     bitmap_icon_skull_ir,
     bitmap_icon_skull_tools,
     bitmap_icon_skull_setting,
@@ -182,6 +185,26 @@ const unsigned char *subghz_submenu_icons[subghz_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_no_signal,
     bitmap_icon_analyzer,
     bitmap_icon_list,
+    bitmap_icon_go_back
+};
+
+// RFID Submenu - 6 items
+const int rfid_NUM_SUBMENU_ITEMS = 6;
+const char *rfid_submenu_items[rfid_NUM_SUBMENU_ITEMS] = {
+    "Card Scanner",
+    "Card Reader",
+    "Card Clone",
+    "Key Brute Force",
+    "Card Emulate",
+    "Back to Main Menu"
+};
+
+const unsigned char *rfid_submenu_icons[rfid_NUM_SUBMENU_ITEMS] = {
+    bitmap_icon_scanner,
+    bitmap_icon_list,
+    bitmap_icon_floppy,
+    bitmap_icon_key,
+    bitmap_icon_rfid,
     bitmap_icon_go_back
 };
 
@@ -286,7 +309,7 @@ const int COLUMN_WIDTH = SCREEN_WIDTH / 2;
 const int X_OFFSET_LEFT = 10;
 const int X_OFFSET_RIGHT = X_OFFSET_LEFT + COLUMN_WIDTH;
 const int Y_START = 30;
-const int Y_SPACING = (SCREEN_HEIGHT - CONTENT_Y_START - BUTTON_BAR_H) / 4;
+const int Y_SPACING = (SCREEN_HEIGHT - CONTENT_Y_START - BUTTON_BAR_H) / 5;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ICON BAR HELPER - MATCHES ORIGINAL HALEHOUND
@@ -341,22 +364,27 @@ void updateActiveSubmenu() {
             active_submenu_size = subghz_NUM_SUBMENU_ITEMS;
             active_submenu_icons = subghz_submenu_icons;
             break;
-        case 4: // SIGINT
+        case 4: // RFID
+            active_submenu_items = rfid_submenu_items;
+            active_submenu_size = rfid_NUM_SUBMENU_ITEMS;
+            active_submenu_icons = rfid_submenu_icons;
+            break;
+        case 5: // SIGINT
             active_submenu_items = sigint_submenu_items;
             active_submenu_size = sigint_NUM_SUBMENU_ITEMS;
             active_submenu_icons = sigint_submenu_icons;
             break;
-        case 5: // Tools
+        case 6: // Tools
             active_submenu_items = tools_submenu_items;
             active_submenu_size = tools_NUM_SUBMENU_ITEMS;
             active_submenu_icons = tools_submenu_icons;
             break;
-        case 6: // Settings
+        case 7: // Settings
             active_submenu_items = settings_submenu_items;
             active_submenu_size = settings_NUM_SUBMENU_ITEMS;
             active_submenu_icons = settings_submenu_icons;
             break;
-        case 7: // About
+        case 8: // About
             active_submenu_items = about_submenu_items;
             active_submenu_size = about_NUM_SUBMENU_ITEMS;
             active_submenu_icons = about_submenu_icons;
@@ -451,10 +479,10 @@ void displayMenu() {
         // Flaming skulls watermark - pushed down behind menu
         tft.drawBitmap(0, 0, skull_bg_bitmap, SKULL_BG_WIDTH, SKULL_BG_HEIGHT, 0x2945);  // Dark cyan watermark
 
-        // Draw menu buttons
+        // Draw menu buttons — left column (0-4): 5 items, right column (5-8): 4 items
         for (int i = 0; i < NUM_MENU_ITEMS; i++) {
-            int column = i / 4;
-            int row = i % 4;
+            int column = (i < 5) ? 0 : 1;
+            int row = (i < 5) ? i : (i - 5);
             int x_position = (column == 0) ? X_OFFSET_LEFT : X_OFFSET_RIGHT;
             int y_position = Y_START + row * Y_SPACING;
 
@@ -475,8 +503,8 @@ void displayMenu() {
     // Highlight current selection
     if (last_menu_index != current_menu_index) {
         for (int i = 0; i < NUM_MENU_ITEMS; i++) {
-            int column = i / 4;
-            int row = i % 4;
+            int column = (i < 5) ? 0 : 1;
+            int row = (i < 5) ? i : (i - 5);
             int x_position = (column == 0) ? X_OFFSET_LEFT : X_OFFSET_RIGHT;
             int y_position = Y_START + row * Y_SPACING;
 
@@ -494,8 +522,8 @@ void displayMenu() {
         }
 
         // Highlight current
-        int column = current_menu_index / 4;
-        int row = current_menu_index % 4;
+        int column = (current_menu_index < 5) ? 0 : 1;
+        int row = (current_menu_index < 5) ? current_menu_index : (current_menu_index - 5);
         int x_position = (column == 0) ? X_OFFSET_LEFT : X_OFFSET_RIGHT;
         int y_position = Y_START + row * Y_SPACING;
 
@@ -1044,6 +1072,109 @@ void showSigintPlaceholder(const char* title) {
         delay(50);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RFID SUBMENU HANDLER
+// ═══════════════════════════════════════════════════════════════════════════
+
+void handleRFIDSubmenuTouch() {
+    touchButtonsUpdate();
+
+    if (isBackButtonTapped()) {
+        returnToMainMenu();
+        return;
+    }
+
+    for (int i = 0; i < active_submenu_size; i++) {
+        int yPos = SUBMENU_Y_START + i * SUBMENU_Y_SPACING;
+        if (i == active_submenu_size - 1) yPos += SUBMENU_LAST_GAP;
+
+        if (isTouchInArea(10, yPos, SUBMENU_TOUCH_W, SUBMENU_TOUCH_H)) {
+            current_submenu_index = i;
+            last_interaction_time = millis();
+            displaySubmenu();
+            delay(200);
+
+            if (current_submenu_index == 5) { // Back
+                returnToMainMenu();
+                return;
+            }
+
+            feature_active = true;
+            feature_exit_requested = false;
+
+            switch (current_submenu_index) {
+                case 0: // Card Scanner
+                    RFIDScanner::setup();
+                    while (!feature_exit_requested) {
+                        RFIDScanner::loop();
+                        if (RFIDScanner::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (isInoBackTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    RFIDScanner::cleanup();
+                    break;
+                case 1: // Card Reader
+                    RFIDReader::setup();
+                    while (!feature_exit_requested) {
+                        RFIDReader::loop();
+                        if (RFIDReader::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (isInoBackTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    RFIDReader::cleanup();
+                    break;
+                case 2: // Card Clone
+                    RFIDClone::setup();
+                    while (!feature_exit_requested) {
+                        RFIDClone::loop();
+                        if (RFIDClone::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (isInoBackTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    RFIDClone::cleanup();
+                    break;
+                case 3: // Key Brute Force
+                    RFIDBrute::setup();
+                    while (!feature_exit_requested) {
+                        RFIDBrute::loop();
+                        if (RFIDBrute::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (isInoBackTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    RFIDBrute::cleanup();
+                    break;
+                case 4: // Card Emulate
+                    RFIDEmulate::setup();
+                    while (!feature_exit_requested) {
+                        RFIDEmulate::loop();
+                        if (RFIDEmulate::isExitRequested()) feature_exit_requested = true;
+                        touchButtonsUpdate();
+                        if (isBackButtonTapped()) feature_exit_requested = true;
+                        if (isInoBackTapped()) feature_exit_requested = true;
+                        if (digitalRead(0) == LOW) { delay(200); feature_exit_requested = true; }
+                    }
+                    RFIDEmulate::cleanup();
+                    break;
+            }
+
+            returnToSubmenu();
+            break;
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SIGINT SUBMENU HANDLER
+// ═══════════════════════════════════════════════════════════════════════════
 
 void handleSIGINTSubmenuTouch() {
     touchButtonsUpdate();
@@ -2174,10 +2305,11 @@ void handleButtons() {
             case 1: handleBluetoothSubmenuTouch(); break;
             case 2: handleNRFSubmenuTouch(); break;
             case 3: handleSubGHzSubmenuTouch(); break;
-            case 4: handleSIGINTSubmenuTouch(); break;
-            case 5: handleToolsSubmenuTouch(); break;
-            case 6: handleSettingsSubmenuTouch(); break;
-            case 7: handleAboutPage(); break;
+            case 4: handleRFIDSubmenuTouch(); break;
+            case 5: handleSIGINTSubmenuTouch(); break;
+            case 6: handleToolsSubmenuTouch(); break;
+            case 7: handleSettingsSubmenuTouch(); break;
+            case 8: handleAboutPage(); break;
             default: break;
         }
     } else {
@@ -2186,8 +2318,8 @@ void handleButtons() {
 
         // Check touch on menu items
         for (int i = 0; i < NUM_MENU_ITEMS; i++) {
-            int column = i / 4;
-            int row = i % 4;
+            int column = (i < 5) ? 0 : 1;
+            int row = (i < 5) ? i : (i - 5);
             int x_position = (column == 0) ? X_OFFSET_LEFT : X_OFFSET_RIGHT;
             int y_position = Y_START + row * Y_SPACING;
 
@@ -2487,6 +2619,11 @@ void setup() {
     spiManagerSetup();
     Serial.println("[INIT] SPI Manager OK");
 
+    // Touch buttons — init early so GT911 (3.5" CYD) is ready before NRF24 check
+    // GT911 uses I2C, XPT2046 uses software SPI — neither conflicts with VSPI radios
+    initButtons();
+    Serial.println("[INIT] Touch buttons OK");
+
     // ═══════════════════════════════════════════════════════════════════════
     // WRONG FIRMWARE DETECTION — catch CYD-HAT firmware on standard CYD
     // or standard CYD firmware on a hat board BEFORE they waste time debugging
@@ -2548,10 +2685,6 @@ void setup() {
 
     // Boot diagnostics disabled for normal boot — function kept for second board debugging
     // runBootDiagnostics();
-
-    // Touch buttons
-    initButtons();
-    Serial.println("[INIT] Touch buttons OK");
 
     // Touch test available via runTouchTest() if needed for recalibration
 

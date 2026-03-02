@@ -216,6 +216,39 @@
 #define NRF24_MISO      RADIO_SPI_MISO
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PN532 NFC/RFID MODULE (13.56 MHz)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WIRING DIAGRAM:
+// ┌─────────────┐      ┌─────────────┐
+// │  PN532 V3   │      │     CYD     │
+// │ (Elechouse) │      │   ESP32     │
+// ├─────────────┤      ├─────────────┤
+// │ VCC ────────┼──────┤ 3.3V (CN1)  │
+// │ GND ────────┼──────┤ GND  (CN1)  │
+// │ SCK ────────┼──────┤ GPIO 18     │ (shared VSPI)
+// │ MOSI ───────┼──────┤ GPIO 23     │ (shared VSPI)
+// │ MISO ───────┼──────┤ GPIO 19     │ (shared VSPI)
+// │ SS ─────────┼──────┤ GPIO 17     │ (was NRF24 IRQ — never used)
+// └─────────────┘      └─────────────┘
+//
+// DIP SWITCHES: CH1=OFF, CH2=ON (SPI mode)
+//
+// NOTE: PN532 uses LSBFIRST SPI (all other VSPI devices use MSBFIRST).
+// Safe because Adafruit library brackets every transfer with
+// beginTransaction(LSBFIRST)/endTransaction(), and SPI manager
+// ensures only one device is active at a time.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+#define PN532_CS        17    // Chip Select - was NRF24 IRQ (RGB Blue LED, unused)
+
+// SPI bus aliases
+#define PN532_SCK       RADIO_SPI_SCK
+#define PN532_MOSI      RADIO_SPI_MOSI
+#define PN532_MISO      RADIO_SPI_MISO
+
+// ═══════════════════════════════════════════════════════════════════════════
 // GPS NEO-6M MODULE (Software Serial)
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -335,12 +368,13 @@
 #define CYD_HAS_RGB_LED     0     // RGB LED DISABLED (pins used for NRF24)
 #define CYD_HAS_SPEAKER     0     // Speaker DISABLED (pin used for GPS)
 #define CYD_HAS_PCF8574     0     // No I2C button expander (unlike ESP32-DIV)
+#define CYD_HAS_PN532       1     // PN532 NFC/RFID reader (13.56 MHz)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SPI BUS SHARING - ACTIVE DEVICES
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// VSPI Bus (GPIO 18/19/23) is SHARED by THREE devices:
+// VSPI Bus (GPIO 18/19/23) is SHARED by FOUR devices:
 //   ┌──────────┬──────────────┬───────────────────────────────┐
 //   │ Device   │ CS Pin       │ Notes                         │
 //   ├──────────┼──────────────┼───────────────────────────────┤
@@ -348,6 +382,7 @@
 //   │ CC1101   │ GPIO 27 (28")│ SubGHz radio                  │
 //   │          │ GPIO 26 (35")│ (27 = backlight on 3.5")      │
 //   │ NRF24    │ GPIO 4       │ 2.4GHz radio                  │
+//   │ PN532    │ GPIO 17      │ NFC/RFID 13.56 MHz (LSBFIRST)│
 //   └──────────┴──────────────┴───────────────────────────────┘
 //
 // IMPORTANT: Only ONE device active at a time!
@@ -360,7 +395,7 @@
 // RGB LED (DISABLED - pins used for NRF24):
 //   RGB_RED   = GPIO 4  → NRF24_CSN
 //   RGB_GREEN = GPIO 16 → NRF24_CE
-//   RGB_BLUE  = GPIO 17 → NRF24_IRQ / GPS_TX
+//   RGB_BLUE  = GPIO 17 → PN532_CS (was NRF24_IRQ, never used)
 //
 // Speaker (DISABLED - pin used for GPS):
 //   SPEAKER = GPIO 26 → GPS_RX_PIN
@@ -370,14 +405,11 @@
 //   Could use for: ambient light detection, battery voltage divider
 
 // ═══════════════════════════════════════════════════════════════════════════
-// POWER MANAGEMENT (Optional)
+// GPIO 34 NOTE
 // ═══════════════════════════════════════════════════════════════════════════
-// If you connect battery voltage through a divider to GPIO34:
-//   LiPo 3.7V → 10K → GPIO34 → 10K → GND (2:1 divider)
-//   Reading: (ADC_value / 4095.0) * 3.3 * 2 = battery voltage
-
-#define BATTERY_ADC_PIN    34
-#define BATTERY_DIVIDER    2.0
+// GPIO 34 = LDR (Light Dependent Resistor) on stock CYD boards.
+// Input only, 12-bit ADC. No battery voltage measurement available
+// without external hardware (voltage divider from 5V rail).
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LAYOUT HELPERS — Use these instead of hardcoded pixel values!
