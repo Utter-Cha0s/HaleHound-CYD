@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HaleHound-CYD Main Firmware
 // ESP32 Cheap Yellow Display Edition
-// v3.1.0 — Stalkerware Detect, EAPOL back button fix, Duggie contributor
+// v3.2.0 — Jam Detect, PN532 RFID/NFC, IoT Recon, Stalkerware Detect
 // Created: 2026-02-06
 // ═══════════════════════════════════════════════════════════════════════════
 //

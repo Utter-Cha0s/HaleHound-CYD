@@ -152,10 +152,9 @@ static void drawCalibrationBar(int y, int percent) {
 // CLEAR = teal dominant, SUSPICIOUS = mid gradient, JAMMING = hotpink pulsing
 // ═══════════════════════════════════════════════════════════════════════════
 
-static void drawThreatBar(int y, ThreatLevel level, bool pulseOn) {
+static void drawThreatBar(int y, ThreatLevel level, bool pulseOn, int barH = 14) {
     int barX = 5;
     int barW = SCREEN_WIDTH - 10;
-    int barH = 14;
 
     float threatRatio;
     switch (level) {
@@ -445,38 +444,35 @@ static void addEvent(const char* msg) {
     if (eventCount < MAX_EVENTS) eventCount++;
 }
 
-// Rate bar — teal-to-hotpink gradient fill with magenta border (matches HaleHound style)
-static void drawRateBar(int y, const char* label, uint32_t rate, uint32_t baseline) {
-    tft.fillRect(5, y, SCREEN_WIDTH - 10, 18, TFT_BLACK);
+// Rate bar — full-width teal-to-hotpink gradient fill (label drawn separately above)
+static void drawRateBar(int y, uint32_t rate, uint32_t baseline) {
     bool elevated = (rate > baseline + DEAUTH_SUSPICIOUS_DELTA);
 
-    // Label (left-aligned, 60px wide)
-    tft.setTextColor(HALEHOUND_MAGENTA);
-    tft.setTextSize(1);
-    tft.setCursor(8, y + 5);
-    tft.print(label);
+    int barX = 10;
+    int barW = SCREEN_WIDTH - 20;
+    int barH = 14;
 
-    // Gradient bar with magenta border (dominant visual element)
-    int barX = 62;
-    int barW = SCREEN_WIDTH - 70;
-    int barH = 12;
-    tft.drawRect(barX, y + 3, barW, barH, elevated ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA);
+    // Border — full overdraw, no pre-clear needed
+    tft.drawRect(barX, y, barW, barH, elevated ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA);
+
+    // Gradient fill
     uint32_t maxRate = max((uint32_t)50, baseline * 15);
     int fillW = constrain((int)((rate * (barW - 2)) / maxRate), 0, barW - 2);
     for (int x = 0; x < fillW; x++) {
         float t = (float)x / (float)(barW - 2);
-        tft.drawFastVLine(barX + 1 + x, y + 4, barH - 2, tealToHotPink(t));
+        tft.drawFastVLine(barX + 1 + x, y + 1, barH - 2, tealToHotPink(t));
     }
     if (fillW < barW - 2) {
-        tft.fillRect(barX + 1 + fillW, y + 4, barW - 2 - fillW, barH - 2, TFT_BLACK);
+        tft.fillRect(barX + 1 + fillW, y + 1, barW - 2 - fillW, barH - 2, TFT_BLACK);
     }
 
-    // Rate number (right side, overlaid on bar)
-    tft.setTextColor(elevated ? TFT_WHITE : HALEHOUND_MAGENTA);
+    // Rate number overlaid on right side of bar
     char buf[12];
     snprintf(buf, sizeof(buf), "%lu/s", (unsigned long)rate);
     int tw = strlen(buf) * 6;
-    tft.setCursor(barX + barW - tw - 4, y + 5);
+    tft.setTextColor(elevated ? TFT_WHITE : HALEHOUND_MAGENTA);
+    tft.setTextSize(1);
+    tft.setCursor(barX + barW - tw - 4, y + 3);
     tft.print(buf);
 }
 
@@ -633,56 +629,74 @@ void loop() {
     if (now - lastDraw >= 100 && threat != THREAT_CALIBRATING) {
         lastDraw = now;
 
-        int y = CONTENT_Y_START + 18;
+        int y = CONTENT_Y_START + 20;   // y=58, clear of Nosifer title
 
-        // Threat bar
-        drawThreatBar(y, threat, pulseState);
-        y += 17;
+        // ── Threat bar — 20px tall for visual impact ──
+        drawThreatBar(y, threat, pulseState, 20);
+        y += 24;
 
-        // Gradient separator (teal→hotpink)
-        for (int gx = 0; gx < SCREEN_WIDTH; gx++)
-            tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
-        y += 4;
-
-        // Rate bars
-        drawRateBar(y, "Deauth:", deauthRate, baseDeauthRate + 1);
-        y += 16;
-        drawRateBar(y, "Disass:", disassocRate, baseDisassocRate + 1);
-        y += 16;
-        drawRateBar(y, "Beacon:", beaconRate, baseBeaconRate);
+        // ── DEAUTH ──
+        tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+        tft.setTextSize(1);
+        tft.setCursor(10, y);
+        tft.print("DEAUTH");
+        y += 12;
+        drawRateBar(y, deauthRate, baseDeauthRate + 1);
         y += 18;
 
-        // Gradient separator
+        // ── DISASSOC ──
+        tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+        tft.setCursor(10, y);
+        tft.print("DISASSOC");
+        y += 12;
+        drawRateBar(y, disassocRate, baseDisassocRate + 1);
+        y += 18;
+
+        // ── BEACON ──
+        tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+        tft.setCursor(10, y);
+        tft.print("BEACON");
+        y += 12;
+        drawRateBar(y, beaconRate, baseBeaconRate);
+        y += 18;
+
+        // ── Gradient divider ──
         for (int gx = 0; gx < SCREEN_WIDTH; gx++)
             tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
-        y += 4;
+        y += 6;
 
-        // Channel + RSSI
-        tft.fillRect(5, y, SCREEN_WIDTH - 10, 12, TFT_BLACK);
-        tft.setTextColor(HALEHOUND_MAGENTA);
+        // ── Channel + RSSI ──
+        tft.fillRect(5, y, SCREEN_WIDTH - 10, 10, TFT_BLACK);
+        tft.setTextColor(HALEHOUND_MAGENTA, TFT_BLACK);
         tft.setTextSize(1);
-        tft.setCursor(5, y);
+        tft.setCursor(10, y);
         tft.printf("Ch:%d  RSSI:%d dBm", currentChannel, (int)lastRssi);
         y += 16;
 
-        // Skull meter
-        drawSkullMeter(y, threat);
-        y += 20;
-
-        // Gradient separator
+        // ── Gradient divider ──
         for (int gx = 0; gx < SCREEN_WIDTH; gx++)
             tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
-        y += 4;
+        y += 6;
 
-        // Event log (most recent first) — magenta text for visibility
-        tft.fillRect(5, y, SCREEN_WIDTH - 10, MAX_EVENTS * 12, TFT_BLACK);
+        // ── Event log (5 lines, per-line clear to avoid flicker) ──
         int idx = (eventHead - eventCount + MAX_EVENTS) % MAX_EVENTS;
-        for (int i = 0; i < eventCount && i < MAX_EVENTS; i++) {
-            JdEvent& e = events[(idx + eventCount - 1 - i) % MAX_EVENTS];
-            tft.setTextColor(HALEHOUND_MAGENTA);
-            tft.setCursor(5, y + i * 12);
-            tft.printf("[%lus] %s", (unsigned long)e.timestamp, e.msg);
+        for (int i = 0; i < 5; i++) {
+            tft.fillRect(5, y + i * 14, SCREEN_WIDTH - 10, 12, TFT_BLACK);
+            if (i < eventCount) {
+                JdEvent& e = events[(idx + eventCount - 1 - i) % MAX_EVENTS];
+                tft.setTextColor(HALEHOUND_MAGENTA, TFT_BLACK);
+                tft.setCursor(5, y + i * 14);
+                tft.printf("[%lus] %s", (unsigned long)e.timestamp, e.msg);
+            }
         }
+        y += 5 * 14;
+
+        // ── Gradient divider ──
+        for (int gx = 0; gx < SCREEN_WIDTH; gx++)
+            tft.drawFastVLine(gx, y + 2, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
+
+        // ── Skull meter — anchored near bottom ──
+        drawSkullMeter(SCREEN_HEIGHT - 30, threat);
     }
 
     // Icon bar status (200ms — matches SubAnalyzer)
@@ -1252,14 +1266,13 @@ static void drawGwBarGraph() {
         }
     }
 
-    // ── Status area below graph ──
+    // ── Status area below graph (NO full-area clear — targeted overdraws only) ──
     int statusY = GW_BAR_Y + GW_BAR_H + 6;
-    tft.fillRect(0, statusY, SCREEN_WIDTH, SCREEN_HEIGHT - statusY, TFT_BLACK);
 
     // Hotpink divider
     tft.drawFastHLine(0, statusY - 2, SCREEN_WIDTH, HALEHOUND_HOTPINK);
 
-    // Threat bar — compact, right below divider
+    // Threat bar — fully overdraws its own region, no pre-clear needed
     drawThreatBar(statusY, threat, pulseState);
     statusY += 16;
 
@@ -1271,6 +1284,8 @@ static void drawGwBarGraph() {
     }
     int activePct = (activeCount * 100) / GW_CHANNELS;
 
+    // Clear just the text line, then overdraw
+    tft.fillRect(5, statusY + 2, SCREEN_WIDTH - 10, 10, TFT_BLACK);
     tft.setTextSize(1);
     tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
     tft.setCursor(5, statusY + 2);
@@ -1312,12 +1327,14 @@ static void drawGwBarGraph() {
     // Skull frame advance EVERY draw call (Scanner-exact animation speed)
     jdSkullFrame++;
 
-    // Percentage after skulls
+    // Clear just the percentage area, then overdraw
+    int pctX = skullStartX + (JD_NUM_SKULLS * skullSpacing) + 2;
+    tft.fillRect(pctX, statusY + 4, 30, 10, TFT_BLACK);
     int pct = (peakLevel * 100) / 125;
     if (pct > 100) pct = 100;
     tft.setTextColor(HALEHOUND_BRIGHT, TFT_BLACK);
     tft.setTextSize(1);
-    tft.setCursor(skullStartX + (JD_NUM_SKULLS * skullSpacing) + 2, statusY + 4);
+    tft.setCursor(pctX, statusY + 4);
     tft.printf("%d%%", pct);
 }
 
