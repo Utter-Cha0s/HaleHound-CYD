@@ -445,31 +445,39 @@ static void addEvent(const char* msg) {
     if (eventCount < MAX_EVENTS) eventCount++;
 }
 
-// Rate bar — teal-to-hotpink gradient fill proportional to rate
+// Rate bar — teal-to-hotpink gradient fill with magenta border (matches HaleHound style)
 static void drawRateBar(int y, const char* label, uint32_t rate, uint32_t baseline) {
-    tft.fillRect(5, y, SCREEN_WIDTH - 10, 14, TFT_BLACK);
+    tft.fillRect(5, y, SCREEN_WIDTH - 10, 18, TFT_BLACK);
+    bool elevated = (rate > baseline + DEAUTH_SUSPICIOUS_DELTA);
+
+    // Label (left-aligned, 60px wide)
     tft.setTextColor(HALEHOUND_MAGENTA);
     tft.setTextSize(1);
-    tft.setCursor(5, y + 2);
+    tft.setCursor(8, y + 5);
     tft.print(label);
 
-    // Rate number
-    tft.setCursor(72, y + 2);
-    bool elevated = (rate > baseline + DEAUTH_SUSPICIOUS_DELTA);
-    tft.setTextColor(elevated ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA);
-    tft.printf("%lu/s", (unsigned long)rate);
-
-    // Mini gradient bar
-    int barX = 120;
-    int barW = SCREEN_WIDTH - 125;
-    int barH = 8;
-    tft.drawRect(barX, y + 3, barW, barH, HALEHOUND_GUNMETAL);
+    // Gradient bar with magenta border (dominant visual element)
+    int barX = 62;
+    int barW = SCREEN_WIDTH - 70;
+    int barH = 12;
+    tft.drawRect(barX, y + 3, barW, barH, elevated ? HALEHOUND_HOTPINK : HALEHOUND_MAGENTA);
     uint32_t maxRate = max((uint32_t)50, baseline * 15);
     int fillW = constrain((int)((rate * (barW - 2)) / maxRate), 0, barW - 2);
     for (int x = 0; x < fillW; x++) {
         float t = (float)x / (float)(barW - 2);
         tft.drawFastVLine(barX + 1 + x, y + 4, barH - 2, tealToHotPink(t));
     }
+    if (fillW < barW - 2) {
+        tft.fillRect(barX + 1 + fillW, y + 4, barW - 2 - fillW, barH - 2, TFT_BLACK);
+    }
+
+    // Rate number (right side, overlaid on bar)
+    tft.setTextColor(elevated ? TFT_WHITE : HALEHOUND_MAGENTA);
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%lu/s", (unsigned long)rate);
+    int tw = strlen(buf) * 6;
+    tft.setCursor(barX + barW - tw - 4, y + 5);
+    tft.print(buf);
 }
 
 void setup() {
@@ -625,14 +633,15 @@ void loop() {
     if (now - lastDraw >= 100 && threat != THREAT_CALIBRATING) {
         lastDraw = now;
 
-        int y = CONTENT_Y_START + 20;
+        int y = CONTENT_Y_START + 18;
 
         // Threat bar
         drawThreatBar(y, threat, pulseState);
-        y += 18;
+        y += 17;
 
-        // Hot pink separator
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+        // Gradient separator (teal→hotpink)
+        for (int gx = 0; gx < SCREEN_WIDTH; gx++)
+            tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
         y += 4;
 
         // Rate bars
@@ -643,8 +652,9 @@ void loop() {
         drawRateBar(y, "Beacon:", beaconRate, baseBeaconRate);
         y += 18;
 
-        // Hot pink separator
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+        // Gradient separator
+        for (int gx = 0; gx < SCREEN_WIDTH; gx++)
+            tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
         y += 4;
 
         // Channel + RSSI
@@ -659,16 +669,17 @@ void loop() {
         drawSkullMeter(y, threat);
         y += 20;
 
-        // Hot pink separator
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+        // Gradient separator
+        for (int gx = 0; gx < SCREEN_WIDTH; gx++)
+            tft.drawFastVLine(gx, y, 2, tealToHotPink((float)gx / SCREEN_WIDTH));
         y += 4;
 
-        // Event log (most recent first)
+        // Event log (most recent first) — magenta text for visibility
         tft.fillRect(5, y, SCREEN_WIDTH - 10, MAX_EVENTS * 12, TFT_BLACK);
         int idx = (eventHead - eventCount + MAX_EVENTS) % MAX_EVENTS;
         for (int i = 0; i < eventCount && i < MAX_EVENTS; i++) {
             JdEvent& e = events[(idx + eventCount - 1 - i) % MAX_EVENTS];
-            tft.setTextColor(HALEHOUND_GUNMETAL);
+            tft.setTextColor(HALEHOUND_MAGENTA);
             tft.setCursor(5, y + i * 12);
             tft.printf("[%lus] %s", (unsigned long)e.timestamp, e.msg);
         }
@@ -815,23 +826,18 @@ static void drawSpectrumBars() {
         int x = graphX + ch * SS_BAR_STRIDE;
         int prev = prevBarSegs[ch];
 
-        // Update peak-hold (hot pink falling dot — matches SubAnalyzer)
-        if (segs > peakSegs[ch]) {
+        // Peak-hold tracking (matches SubAnalyzer exactly)
+        if (segs > (int)peakSegs[ch]) {
             peakSegs[ch] = segs;
             peakHoldTime[ch] = now;
-        } else if (now - peakHoldTime[ch] > 400 && peakSegs[ch] > 0) {
-            // Erase old peak dot
-            int oldPy = SS_GRAPH_Y + SS_GRAPH_H - (peakSegs[ch] + 1) * SS_SEG_STRIDE - 2;
-            tft.fillRect(x, oldPy, SS_BAR_WIDTH, 2, TFT_BLACK);
-            peakSegs[ch]--;
-            peakHoldTime[ch] = now;
+        } else if (now - peakHoldTime[ch] > 400) {
+            if (peakSegs[ch] > 0) peakSegs[ch]--;
         }
 
         if (segs != prev) {
             if (segs > prev) {
                 for (int s = prev; s < segs; s++) {
                     int sy = SS_GRAPH_Y + SS_GRAPH_H - (s + 1) * SS_SEG_STRIDE;
-                    // Color by position in palette (bottom=purple, top=white)
                     int palIdx = (s * 127) / max(1, SS_SEG_COUNT - 1);
                     tft.fillRect(x, sy, SS_BAR_WIDTH, SS_SEG_H, jdHeatPalette[palIdx]);
                 }
@@ -844,10 +850,16 @@ static void drawSpectrumBars() {
             prevBarSegs[ch] = segs;
         }
 
-        // Draw peak-hold dot (hot pink — matches SubAnalyzer)
-        if (peakSegs[ch] > 0) {
-            int peakPy = SS_GRAPH_Y + SS_GRAPH_H - (peakSegs[ch] + 1) * SS_SEG_STRIDE - 2;
-            tft.fillRect(x, peakPy, SS_BAR_WIDTH, 2, HALEHOUND_HOTPINK);
+        // Peak-hold dot (hot pink, full segment height — matches SubAnalyzer)
+        int peakSeg = (int)peakSegs[ch];
+        if (peakSeg > segs && peakSeg > 0) {
+            int peakY = SS_GRAPH_Y + SS_GRAPH_H - peakSeg * SS_SEG_STRIDE;
+            // Erase segment above peak (in case it fell)
+            if (peakSeg + 1 <= SS_SEG_COUNT) {
+                int aboveY = SS_GRAPH_Y + SS_GRAPH_H - (peakSeg + 1) * SS_SEG_STRIDE;
+                tft.fillRect(x, aboveY, SS_BAR_WIDTH, SS_SEG_H, TFT_BLACK);
+            }
+            tft.fillRect(x, peakY, SS_BAR_WIDTH, SS_SEG_H, HALEHOUND_HOTPINK);
         }
     }
 }
@@ -1040,31 +1052,41 @@ namespace GHzWatchdog {
 
 #define GW_CHANNELS 85
 
-// RPD data
-static volatile uint8_t rpdNow[GW_CHANNELS];
-static uint8_t rpdBaseline[GW_CHANNELS];
-static uint8_t rpdSmoothed[GW_CHANNELS];
+// ── Scanner-style bar graph layout (EXACT match to 2.4GHz Scanner) ───────
+#define GW_BAR_X       10
+#define GW_BAR_Y       (CONTENT_Y_START + 4)   // Same as Scanner
+#define GW_BAR_W       CONTENT_INNER_W          // 220px on 2.8"
+#define GW_BAR_H       SCALE_Y(210)             // SAME height as Scanner
+
+// WiFi channel positions (NRF24 channel numbers)
+#define GW_WIFI_CH1    12
+#define GW_WIFI_CH6    37
+#define GW_WIFI_CH11   62
+#define GW_WIFI_CH13   72
+
+// Display-level smoothed values (0-125 range, Scanner-exact exponential decay)
+// Written by Core 0 scan task, read by Core 1 display
+static uint8_t gwDisplayLevel[GW_CHANNELS];
+
+// Raw RPD per frame — binary 0/1 per channel (for detection logic)
+static volatile uint8_t gwRpdRaw[GW_CHANNELS];
 
 // Calibration
-static uint32_t calAccum[GW_CHANNELS];
+static uint32_t calAccum[GW_CHANNELS];   // RPD hit count during calibration
 static int calSweepCount = 0;
 #define GW_CAL_DURATION_MS 5000
-#define GW_SWEEPS_PER_FRAME 4
 
-// Channel map — teal-to-hotpink gradient bars (matches Scanner)
-#define GW_BAR_START_X  10
-#define GW_BAR_START_Y  SCALE_Y(68)
-#define GW_BAR_WIDTH    CONTENT_INNER_W
-#define GW_BAR_HEIGHT   SCALE_Y(140)
+// Baseline: average RPD detection rate per channel (0-100 = % of cal frames with RPD)
+static uint8_t gwBaseline[GW_CHANNELS];
 
-static uint8_t prevBarH[GW_CHANNELS];
-static uint8_t peakBarH[GW_CHANNELS];
-static unsigned long peakBarTime[GW_CHANNELS];
+// Per-channel elevated counter for targeted jam detection
+static uint8_t gwElevated[GW_CHANNELS];
 
-// WiFi channel regions
-static bool isWiFiChannel(int ch) {
-    return (ch >= 2 && ch <= 22) || (ch >= 27 && ch <= 47) || (ch >= 52 && ch <= 72);
-}
+// Detection thresholds — react to ANY jamming
+#define GW_ELEVATED_FRAMES    3    // 3 consecutive elevated → channel flagged
+#define GW_SUSPICIOUS_CHANS   1    // 1+ flagged channels → SUSPICIOUS
+#define GW_JAMMING_CHANS      3    // 3+ flagged channels → JAMMING
+#define GW_BROADBAND_JAM_PCT  50   // 50%+ raw active → instant JAMMING
 
 // Dual-core
 static TaskHandle_t gwScanHandle = NULL;
@@ -1078,39 +1100,30 @@ static unsigned long calStartTime = 0;
 static unsigned long threatClearTimer = 0;
 static bool initialized = false;
 static volatile bool exitRequested = false;
-static unsigned long lastDraw = 0;
 static unsigned long lastStatusDraw = 0;
 static bool pulseState = false;
 static unsigned long lastPulse = 0;
 
-// Thresholds — tuned for real-world 2.4GHz jam detection
-#define GW_SUSPICIOUS_PCT  35   // 35%+ channels active = suspicious (was 60 — too strict)
-#define GW_JAMMING_PCT     55   // 55%+ channels active = jamming (was 80 — too strict)
-#define GW_SUSTAINED_MS   500   // 500ms sustained = trigger (was 2000 — way too slow)
+// ── Scan task: SINGLE SWEEP, Scanner-exact smoothing, runs on Core 0 ─────
+// This is the Scanner's scanDisplay() scan loop, running on a dedicated core.
+// Single pass, 200us dwell, binary RPD, exponential smoothing directly into
+// gwDisplayLevel — IDENTICAL animation behavior to the 2.4GHz Scanner.
+static void gwScanTask(void* param) {
+    while (gwScanRunning) {
+        if (gwFrameReady) { vTaskDelay(1); continue; }
 
-static unsigned long suspiciousSince = 0;
-static unsigned long jammingSince = 0;
-static int gwConsecutiveHigh = 0;  // Count consecutive high-activity frames
-
-static void rpdSweep() {
-    uint8_t hits[GW_CHANNELS];
-    memset(hits, 0, sizeof(hits));
-    for (int sweep = 0; sweep < GW_SWEEPS_PER_FRAME; sweep++) {
         for (int ch = 0; ch < GW_CHANNELS; ch++) {
             jdNrfSetChannel(ch);
             jdNrfSetRX();
             delayMicroseconds(200);
-            if (jdNrfCarrierDetected()) hits[ch]++;
+            int rpd = jdNrfCarrierDetected() ? 1 : 0;
             digitalWrite(NRF24_CE, LOW);
-        }
-    }
-    for (int ch = 0; ch < GW_CHANNELS; ch++) rpdNow[ch] = hits[ch];
-}
 
-static void gwScanTask(void* param) {
-    while (gwScanRunning) {
-        if (gwFrameReady) { vTaskDelay(1); continue; }
-        rpdSweep();
+            // Scanner-EXACT smoothing: (old + rpd*125) / 2
+            gwDisplayLevel[ch] = (gwDisplayLevel[ch] + rpd * 125) / 2;
+            gwRpdRaw[ch] = rpd;
+        }
+
         gwFrameReady = true;
     }
     gwScanHandle = NULL;
@@ -1133,63 +1146,179 @@ static void stopScanTask() {
     }
 }
 
-// Draw channel map — per-scanline teal-to-hotpink gradient + peak dots (matches Scanner)
-static void drawChannelMap() {
-    int barPixelW = GW_BAR_WIDTH / GW_CHANNELS;
-    if (barPixelW < 2) barPixelW = 2;
-    unsigned long now = millis();
+// ── Get bar color — teal to hot pink gradient by position (EXACT Scanner match) ──
+static uint16_t gwBarColor(int height, int maxHeight) {
+    float ratio = (float)height / (float)maxHeight;
+    if (ratio > 1.0f) ratio = 1.0f;
+    if (ratio < 0.0f) ratio = 0.0f;
+    uint8_t r = (uint8_t)(ratio * 255);
+    uint8_t g = 207 - (uint8_t)(ratio * (207 - 28));
+    uint8_t b = 255 - (uint8_t)(ratio * (255 - 82));
+    return tft.color565(r, g, b);
+}
 
+// ── Draw scanner frame — axes, WiFi markers, channel labels, freq labels ──
+static void drawGwFrame() {
+    // Y-axis
+    tft.drawFastVLine(GW_BAR_X - 2, GW_BAR_Y, GW_BAR_H, HALEHOUND_MAGENTA);
+
+    // X-axis
+    tft.drawFastHLine(GW_BAR_X, GW_BAR_Y + GW_BAR_H, GW_BAR_W, HALEHOUND_MAGENTA);
+
+    // WiFi channel marker positions
+    int x1  = GW_BAR_X + (GW_WIFI_CH1  * GW_BAR_W / GW_CHANNELS);
+    int x6  = GW_BAR_X + (GW_WIFI_CH6  * GW_BAR_W / GW_CHANNELS);
+    int x11 = GW_BAR_X + (GW_WIFI_CH11 * GW_BAR_W / GW_CHANNELS);
+    int x13 = GW_BAR_X + (GW_WIFI_CH13 * GW_BAR_W / GW_CHANNELS);
+
+    // Dashed vertical lines through graph
+    for (int y = GW_BAR_Y; y < GW_BAR_Y + GW_BAR_H; y += 6) {
+        tft.drawPixel(x1,  y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x6,  y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x11, y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x13, y, HALEHOUND_VIOLET);
+    }
+
+    // Channel labels above graph
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(x1 - 2, GW_BAR_Y - 10);
+    tft.print("1");
+    tft.setCursor(x6 - 2, GW_BAR_Y - 10);
+    tft.print("6");
+    tft.setCursor(x11 - 6, GW_BAR_Y - 10);
+    tft.print("11");
+    tft.setTextColor(HALEHOUND_VIOLET, TFT_BLACK);
+    tft.setCursor(x13 - 6, GW_BAR_Y - 10);
+    tft.print("13");
+
+    // Frequency labels below X-axis
+    tft.setTextColor(HALEHOUND_MAGENTA, TFT_BLACK);
+    tft.setCursor(GW_BAR_X - 5, GW_BAR_Y + GW_BAR_H + 4);
+    tft.print("2400");
+    tft.setCursor(GW_BAR_X + GW_BAR_W / 2 - 12, GW_BAR_Y + GW_BAR_H + 4);
+    tft.print("2442");
+    tft.setCursor(GW_BAR_X + GW_BAR_W - 28, GW_BAR_Y + GW_BAR_H + 4);
+    tft.print("2484");
+
+    // Hotpink divider below labels
+    tft.drawFastHLine(0, GW_BAR_Y + GW_BAR_H + 16, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+}
+
+// ── Draw bar graph — 85 gradient bars + skulls + threat (EXACT Scanner style) ──
+static void drawGwBarGraph() {
+    // Clear bar area
+    tft.fillRect(GW_BAR_X, GW_BAR_Y, GW_BAR_W, GW_BAR_H, TFT_BLACK);
+
+    // Redraw WiFi channel markers
+    int x1  = GW_BAR_X + (GW_WIFI_CH1  * GW_BAR_W / GW_CHANNELS);
+    int x6  = GW_BAR_X + (GW_WIFI_CH6  * GW_BAR_W / GW_CHANNELS);
+    int x11 = GW_BAR_X + (GW_WIFI_CH11 * GW_BAR_W / GW_CHANNELS);
+    int x13 = GW_BAR_X + (GW_WIFI_CH13 * GW_BAR_W / GW_CHANNELS);
+
+    for (int y = GW_BAR_Y; y < GW_BAR_Y + GW_BAR_H; y += 6) {
+        tft.drawPixel(x1,  y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x6,  y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x11, y, HALEHOUND_HOTPINK);
+        tft.drawPixel(x13, y, HALEHOUND_VIOLET);
+    }
+
+    // Track peak for display
+    int peakChannel = 0;
+    uint8_t peakLevel = 0;
+
+    // Draw 85 bars — 2px wide, bottom-aligned, teal→hotpink gradient
     for (int ch = 0; ch < GW_CHANNELS; ch++) {
-        int barH = constrain(map(rpdSmoothed[ch], 0, GW_SWEEPS_PER_FRAME, 0, GW_BAR_HEIGHT), 0, GW_BAR_HEIGHT);
-        if (rpdSmoothed[ch] > 0 && barH < 4) barH = 4;  // Minimum 4px if active
-        int x = GW_BAR_START_X + ch * barPixelW;
-        int prev = prevBarH[ch];
+        uint8_t level = gwDisplayLevel[ch];
 
-        // Peak-hold tracking (hot pink falling dot — matches Scanner)
-        if (barH > (int)peakBarH[ch]) {
-            peakBarH[ch] = barH;
-            peakBarTime[ch] = now;
-        } else if (now - peakBarTime[ch] > 400 && peakBarH[ch] > 0) {
-            // Erase old peak dot
-            int oldPy = GW_BAR_START_Y + GW_BAR_HEIGHT - 1 - peakBarH[ch] - 1;
-            tft.drawFastHLine(x, oldPy, barPixelW - 1, TFT_BLACK);
-            peakBarH[ch]--;
-            peakBarTime[ch] = now;
+        if (level > peakLevel) {
+            peakLevel = level;
+            peakChannel = ch;
         }
 
-        if (barH != prev) {
-            if (barH > prev) {
-                for (int dy = prev; dy < barH; dy++) {
-                    float ratio = (float)dy / (float)GW_BAR_HEIGHT;
-                    int py = GW_BAR_START_Y + GW_BAR_HEIGHT - 1 - dy;
-                    tft.drawFastHLine(x, py, barPixelW - 1, tealToHotPink(ratio));
-                }
-            } else {
-                int py = GW_BAR_START_Y + GW_BAR_HEIGHT - prev;
-                tft.fillRect(x, py, barPixelW - 1, prev - barH, TFT_BLACK);
-            }
-            prevBarH[ch] = barH;
-        }
+        if (level > 0) {
+            int x = GW_BAR_X + (ch * GW_BAR_W / GW_CHANNELS);
+            int barH = (level * GW_BAR_H) / 125;
+            if (barH > GW_BAR_H) barH = GW_BAR_H;
+            if (barH < 4 && level > 0) barH = 4;   // Minimum 4px visible
 
-        // Draw peak-hold dot (hot pink)
-        if (peakBarH[ch] > 0) {
-            int peakPy = GW_BAR_START_Y + GW_BAR_HEIGHT - 1 - peakBarH[ch] - 1;
-            tft.drawFastHLine(x, peakPy, barPixelW - 1, HALEHOUND_HOTPINK);
-        }
-    }
+            int barY = GW_BAR_Y + GW_BAR_H - barH;
 
-    // WiFi channel markers — dashed vertical lines (matches Scanner)
-    static unsigned long lastMarkerDraw = 0;
-    if (now - lastMarkerDraw >= 500) {
-        lastMarkerDraw = now;
-        int chMarkers[] = {12, 37, 62};
-        for (int m = 0; m < 3; m++) {
-            int mx = GW_BAR_START_X + chMarkers[m] * barPixelW;
-            for (int dy = 0; dy < GW_BAR_HEIGHT; dy += 6) {
-                tft.drawPixel(mx, GW_BAR_START_Y + dy, HALEHOUND_HOTPINK);
+            // Gradient bar — row by row from bottom, color by position
+            for (int py = 0; py < barH; py++) {
+                uint16_t color = gwBarColor(py, GW_BAR_H);
+                tft.drawFastHLine(x, barY + barH - 1 - py, 2, color);
             }
         }
     }
+
+    // ── Status area below graph ──
+    int statusY = GW_BAR_Y + GW_BAR_H + 6;
+    tft.fillRect(0, statusY, SCREEN_WIDTH, SCREEN_HEIGHT - statusY, TFT_BLACK);
+
+    // Hotpink divider
+    tft.drawFastHLine(0, statusY - 2, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+
+    // Threat bar — compact, right below divider
+    drawThreatBar(statusY, threat, pulseState);
+    statusY += 16;
+
+    // Peak frequency + active channel count
+    int peakFreq = 2400 + peakChannel;
+    int activeCount = 0;
+    for (int ch = 0; ch < GW_CHANNELS; ch++) {
+        if (gwRpdRaw[ch] > 0) activeCount++;
+    }
+    int activePct = (activeCount * 100) / GW_CHANNELS;
+
+    tft.setTextSize(1);
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    tft.setCursor(5, statusY + 2);
+    tft.print("PEAK:");
+    tft.setTextColor(HALEHOUND_BRIGHT, TFT_BLACK);
+    tft.printf(" %d", peakFreq);
+    tft.setTextColor(HALEHOUND_MAGENTA, TFT_BLACK);
+    tft.print("MHz");
+
+    // Active channels on right side
+    tft.setTextColor(HALEHOUND_HOTPINK, TFT_BLACK);
+    tft.setCursor(SCALE_X(140), statusY + 2);
+    tft.printf("%d/%d", activeCount, GW_CHANNELS);
+    tft.setTextColor(HALEHOUND_MAGENTA, TFT_BLACK);
+    tft.printf(" (%d%%)", activePct);
+
+    statusY += 14;
+
+    // Skull signal meter — 8 skulls with wave animation (exact Scanner match)
+    int skullStartX = 10;
+    int skullSpacing = SCALE_X(28);
+
+    // Skulls lit = peak level mapped to 0-8
+    int litSkulls = (peakLevel * 8) / 4;
+    if (litSkulls > JD_NUM_SKULLS) litSkulls = JD_NUM_SKULLS;
+
+    for (int i = 0; i < JD_NUM_SKULLS; i++) {
+        int sx = skullStartX + (i * skullSpacing);
+        tft.fillRect(sx, statusY, 16, 16, HALEHOUND_BLACK);
+
+        if (i < litSkulls && peakLevel > 0) {
+            tft.drawBitmap(sx, statusY, jdSkulls[i], 16, 16,
+                skullWaveColor(jdSkullFrame, i));
+        } else {
+            tft.drawBitmap(sx, statusY, jdSkulls[i], 16, 16, HALEHOUND_GUNMETAL);
+        }
+    }
+
+    // Skull frame advance EVERY draw call (Scanner-exact animation speed)
+    jdSkullFrame++;
+
+    // Percentage after skulls
+    int pct = (peakLevel * 100) / 125;
+    if (pct > 100) pct = 100;
+    tft.setTextColor(HALEHOUND_BRIGHT, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(skullStartX + (JD_NUM_SKULLS * skullSpacing) + 2, statusY + 4);
+    tft.printf("%d%%", pct);
 }
 
 void setup() {
@@ -1203,33 +1332,29 @@ void setup() {
 
     if (!jdNrfInit()) {
         tft.setTextColor(HALEHOUND_HOTPINK);
-        tft.setCursor(10, 100);
-        tft.print("NRF24 NOT FOUND");
-        tft.setTextColor(HALEHOUND_GUNMETAL);
-        tft.setCursor(10, 115);
-        tft.print("Check SPI wiring");
+        tft.setTextSize(2);
+        drawCenteredText(100, "NRF24 NOT FOUND", HALEHOUND_HOTPINK, 2);
+        tft.setTextSize(1);
+        drawCenteredText(130, "Check SPI wiring", HALEHOUND_MAGENTA, 1);
         delay(2000);
         exitRequested = true;
         initialized = true;
         return;
     }
 
-    memset((void*)rpdNow, 0, sizeof(rpdNow));
-    memset(rpdBaseline, 0, sizeof(rpdBaseline));
-    memset(rpdSmoothed, 0, sizeof(rpdSmoothed));
+    memset(gwDisplayLevel, 0, sizeof(gwDisplayLevel));
+    memset((void*)gwRpdRaw, 0, sizeof(gwRpdRaw));
     memset(calAccum, 0, sizeof(calAccum));
-    memset(prevBarH, 0, sizeof(prevBarH));
-    memset(peakBarH, 0, sizeof(peakBarH));
-    memset(peakBarTime, 0, sizeof(peakBarTime));
+    memset(gwBaseline, 0, sizeof(gwBaseline));
+    memset(gwElevated, 0, sizeof(gwElevated));
     calSweepCount = 0;
 
     threat = THREAT_CALIBRATING;
     exitRequested = false;
     calStartTime = millis();
     threatClearTimer = millis();
-    lastDraw = 0; lastStatusDraw = 0;
+    lastStatusDraw = 0;
     lastPulse = millis(); pulseState = false;
-    suspiciousSince = 0; jammingSince = 0;
 
     drawCenteredText(SCALE_Y(72), "Calibrating 2.4GHz...", HALEHOUND_MAGENTA, 1);
 
@@ -1248,15 +1373,16 @@ void loop() {
 
     unsigned long now = millis();
 
-    if (now - lastPulse >= 100) {
+    // Pulse for threat bar (Scanner doesn't use this — but threat bar does)
+    if (now - lastPulse >= 300) {
         pulseState = !pulseState;
-        jdSkullFrame++;
         lastPulse = now;
     }
 
     if (gwFrameReady) {
         if (threat == THREAT_CALIBRATING) {
-            for (int ch = 0; ch < GW_CHANNELS; ch++) calAccum[ch] += rpdNow[ch];
+            // Accumulate RPD hits per channel for baseline
+            for (int ch = 0; ch < GW_CHANNELS; ch++) calAccum[ch] += gwRpdRaw[ch];
             calSweepCount++;
 
             int elapsed = now - calStartTime;
@@ -1264,88 +1390,74 @@ void loop() {
             drawCalibrationBar(SCALE_Y(90), pct);
 
             if (elapsed >= GW_CAL_DURATION_MS && calSweepCount >= 10) {
+                // Baseline = % of calibration frames where RPD triggered (0-100)
                 for (int ch = 0; ch < GW_CHANNELS; ch++) {
-                    rpdBaseline[ch] = calAccum[ch] / calSweepCount;
+                    gwBaseline[ch] = (calAccum[ch] * 100) / calSweepCount;
                 }
                 threat = THREAT_CLEAR;
                 threatClearTimer = now;
+                memset(gwElevated, 0, sizeof(gwElevated));
 
-                // Redraw UI
+                // Redraw to Scanner-style layout
                 tft.fillScreen(HALEHOUND_BLACK);
                 drawStatusBar();
                 drawJdIconBar();
-                drawGlitchText(SCALE_Y(55), "WATCHDOG", &Nosifer_Regular10pt7b);
-
-                // Freq labels
-                tft.setTextColor(HALEHOUND_MAGENTA);
-                tft.setTextSize(1);
-                tft.setCursor(GW_BAR_START_X, GW_BAR_START_Y + GW_BAR_HEIGHT + 2);
-                tft.print("2400");
-                tft.setCursor(GW_BAR_START_X + GW_BAR_WIDTH / 2 - 10, GW_BAR_START_Y + GW_BAR_HEIGHT + 2);
-                tft.print("2442");
-                tft.setCursor(GW_BAR_START_X + GW_BAR_WIDTH - 24, GW_BAR_START_Y + GW_BAR_HEIGHT + 2);
-                tft.print("2484");
+                drawGwFrame();
             }
         } else {
-            // Smooth + assess
+            // ── JAM DETECTION — reacts to ANY 2.4GHz jamming ──
+            // Per-channel baseline comparison: if a channel that was quiet
+            // is now consistently active, it's being jammed.
+            int flaggedChans = 0;
+            int rawActive = 0;
+
             for (int ch = 0; ch < GW_CHANNELS; ch++) {
-                rpdSmoothed[ch] = (rpdSmoothed[ch] + rpdNow[ch]) / 2;
+                if (gwRpdRaw[ch]) rawActive++;
+
+                // Channel is elevated if RPD=1 and baseline was quiet (<30%)
+                if (gwRpdRaw[ch] && gwBaseline[ch] < 30) {
+                    if (gwElevated[ch] < 255) gwElevated[ch]++;
+                } else {
+                    if (gwElevated[ch] > 0) gwElevated[ch]--;
+                }
+
+                if (gwElevated[ch] >= GW_ELEVATED_FRAMES) flaggedChans++;
             }
 
-            int activeCount = 0;
-            for (int ch = 0; ch < GW_CHANNELS; ch++) {
-                if (rpdNow[ch] > 0) activeCount++;
-            }
-            int activePct = (activeCount * 100) / GW_CHANNELS;
+            int rawPct = (rawActive * 100) / GW_CHANNELS;
 
-            // Frame-counting approach — much more responsive than fragile timers
-            // Increment counter when above threshold, decrement slowly when below
-            if (activePct >= GW_JAMMING_PCT) {
-                gwConsecutiveHigh += 3;  // Ramp up fast
-            } else if (activePct >= GW_SUSPICIOUS_PCT) {
-                gwConsecutiveHigh += 2;
-            } else {
-                if (gwConsecutiveHigh > 0) gwConsecutiveHigh--;  // Decay slow
+            // Assess threat: per-channel OR broadband
+            ThreatLevel newThreat = THREAT_CLEAR;
+            if (flaggedChans >= GW_JAMMING_CHANS || rawPct >= GW_BROADBAND_JAM_PCT) {
+                newThreat = THREAT_JAMMING;
+            } else if (flaggedChans >= GW_SUSPICIOUS_CHANS) {
+                newThreat = THREAT_SUSPICIOUS;
             }
-            gwConsecutiveHigh = constrain(gwConsecutiveHigh, 0, 30);
 
-            // Assess threat based on accumulated evidence
-            if (gwConsecutiveHigh >= 15) {
-                threat = THREAT_JAMMING;
+            if (newThreat > THREAT_CLEAR) {
+                threat = newThreat;
                 threatClearTimer = now;
-            } else if (gwConsecutiveHigh >= 6) {
-                threat = THREAT_SUSPICIOUS;
-                threatClearTimer = now;
-            } else if (threat > THREAT_CLEAR && gwConsecutiveHigh == 0) {
-                if (now - threatClearTimer >= THREAT_CLEAR_TIMEOUT_MS) threat = THREAT_CLEAR;
+            } else if (threat > THREAT_CLEAR && now - threatClearTimer >= THREAT_CLEAR_TIMEOUT_MS) {
+                threat = THREAT_CLEAR;
             }
         }
         gwFrameReady = false;
     }
 
-    // Draw channel map as fast as frames arrive
+    // Draw bar graph every loop — Scanner draws every frame, so do we
     if (threat != THREAT_CALIBRATING) {
-        drawChannelMap();
+        drawGwBarGraph();
     }
 
-    // Status 200ms
+    // Icon bar status 200ms
     if (now - lastStatusDraw >= 200 && threat != THREAT_CALIBRATING) {
         lastStatusDraw = now;
-
-        int y = GW_BAR_START_Y + GW_BAR_HEIGHT + 14;
-        tft.fillRect(5, y, SCREEN_WIDTH - 10, 12, TFT_BLACK);
-        tft.setTextColor(HALEHOUND_MAGENTA);
-        tft.setTextSize(1);
-        tft.setCursor(5, y);
         int activeCount = 0;
         for (int ch = 0; ch < GW_CHANNELS; ch++) {
-            if (rpdNow[ch] > 0) activeCount++;
+            if (gwRpdRaw[ch]) activeCount++;
         }
-        tft.printf("%d/%d ch (%d%%)  %s", activeCount, GW_CHANNELS,
-            (activeCount * 100) / GW_CHANNELS, threatText(threat));
-
         char buf[24];
-        snprintf(buf, sizeof(buf), "%d%% active %s", (activeCount * 100) / GW_CHANNELS, threatText(threat));
+        snprintf(buf, sizeof(buf), "%d%% %s", (activeCount * 100) / GW_CHANNELS, threatText(threat));
         drawJdIconBarStatus(buf);
     }
 }
@@ -1529,30 +1641,53 @@ static void stopScanTask() {
     }
 }
 
-// Band indicator with colored dot (matches HaleHound style)
+// Band indicator — filled circle with magenta outline, threat-colored fill, bold status
 static void drawBandIndicator(int y, const char* label, ThreatLevel level) {
-    tft.fillRect(5, y, SCREEN_WIDTH - 10, 14, TFT_BLACK);
+    tft.fillRect(5, y, SCREEN_WIDTH - 10, 16, TFT_BLACK);
     tft.setTextSize(1);
 
-    // Teal-to-hotpink dot based on threat
+    // Threat color mapping
     float ratio = 0.0f;
     if (level == THREAT_SUSPICIOUS) ratio = 0.5f;
     else if (level == THREAT_JAMMING) ratio = 1.0f;
-    uint16_t dotColor = (level == THREAT_CLEAR) ? HALEHOUND_GUNMETAL : tealToHotPink(ratio);
-    tft.fillCircle(15, y + 6, 5, dotColor);
+    uint16_t fillColor = (level == THREAT_CLEAR) ? tealToHotPink(0.0f) : tealToHotPink(ratio);
 
+    // Bigger dot (r=6) with magenta outline ring
+    int dotX = 14;
+    int dotY = y + 7;
+    tft.fillCircle(dotX, dotY, 6, fillColor);
+    tft.drawCircle(dotX, dotY, 6, HALEHOUND_MAGENTA);
+    if (level == THREAT_JAMMING) {
+        tft.drawCircle(dotX, dotY, 7, HALEHOUND_HOTPINK);
+    }
+
+    // Band name in magenta
     tft.setTextColor(HALEHOUND_MAGENTA);
-    tft.setCursor(25, y + 2);
+    tft.setCursor(26, y + 3);
     tft.print(label);
 
-    tft.setTextColor(dotColor == HALEHOUND_GUNMETAL ? HALEHOUND_GUNMETAL : HALEHOUND_HOTPINK);
-    tft.setCursor(140, y + 2);
-    tft.print(threatText(level));
+    // Status text — right-aligned, color matches threat
+    const char* txt = threatText(level);
+    int tw = strlen(txt) * 6;
+    uint16_t txtColor;
+    if (level == THREAT_CLEAR) txtColor = tealToHotPink(0.0f);
+    else if (level == THREAT_SUSPICIOUS) txtColor = tealToHotPink(0.5f);
+    else txtColor = HALEHOUND_HOTPINK;
+    tft.setTextColor(txtColor);
+    tft.setCursor(SCREEN_WIDTH - tw - 8, y + 3);
+    tft.print(txt);
 }
 
-// Mini timeline — teal/mid/hotpink segments
+// Mini timeline — 10px tall gradient bars, full brightness, magenta border
 static void drawMiniTimeline(int y, ThreatLevel* timeline) {
-    int segW = max(1, (SCREEN_WIDTH - 10) / TIMELINE_LEN);
+    int totalW = SCREEN_WIDTH - 20;  // 10px margin each side
+    int startX = 10;
+    int barH = 10;
+    int segW = max(1, totalW / TIMELINE_LEN);
+
+    // Magenta border around entire timeline
+    tft.drawRect(startX - 1, y - 1, segW * TIMELINE_LEN + 2, barH + 2, HALEHOUND_MAGENTA);
+
     for (int i = 0; i < TIMELINE_LEN; i++) {
         int idx = (timelineIdx + i) % TIMELINE_LEN;
         uint16_t color;
@@ -1562,11 +1697,8 @@ static void drawMiniTimeline(int y, ThreatLevel* timeline) {
             case THREAT_JAMMING:     color = tealToHotPink(1.0f); break;
             default:                 color = HALEHOUND_GUNMETAL;  break;
         }
-        // Dim the color slightly for timeline
-        uint8_t r = ((color >> 11) & 0x1F) >> 1;
-        uint8_t g = ((color >> 5) & 0x3F) >> 1;
-        uint8_t b = (color & 0x1F) >> 1;
-        tft.fillRect(5 + i * segW, y, segW, 6, (r << 11) | (g << 5) | b);
+        // Full brightness — no dimming. The border provides visual separation.
+        tft.fillRect(startX + i * segW, y, segW, barH, color);
     }
 }
 
@@ -1730,9 +1862,13 @@ void loop() {
         lastRadioSwap = now;
     }
 
-    // Process scan frame — thresholds match standalone modules
+    // Process scan frame — research-based thresholds
+    // Key insight: normal WiFi occupies NRF24 ch 1-23, 26-48, 51-73
+    // GAP channels (24-25, 49-50, 74-84) should be QUIET in normal environments
+    // Jamming fills ALL channels including gaps — that's the diagnostic
     if (fsFrameReady) {
         if (fsScanCC1101) {
+            // SubGHz: 6dB delta, 3 persist frames, matches standalone SubSentinel
             int flagged = 0;
             for (int ch = 0; ch < 33; ch++) {
                 int delta = fsSubRssi[ch] - fsSubBaseline[ch];
@@ -1744,22 +1880,38 @@ void loop() {
             else if (flagged >= SS_SUSPICIOUS_FREQS) subThreat = THREAT_SUSPICIOUS;
             else subThreat = THREAT_CLEAR;
         } else {
+            // 2.4GHz: check gap channels + broadband percentage
+            // Gap channels = between WiFi bands (should be silent normally)
+            // ch 24-25 (gap between WiFi 1 & 6), ch 49-50 (gap between 6 & 11),
+            // ch 74-84 (above WiFi 11/13)
             int active = 0;
-            for (int ch = 0; ch < 85; ch++) { if (fsNrfRpd[ch] > 0) active++; }
+            int gapActive = 0;
+            for (int ch = 0; ch < 85; ch++) {
+                if (fsNrfRpd[ch] > 0) {
+                    active++;
+                    // Count gap channel activity
+                    if ((ch >= 24 && ch <= 25) || (ch >= 49 && ch <= 50) ||
+                        ch >= 74) {
+                        gapActive++;
+                    }
+                }
+            }
             int pct = (active * 100) / 85;
-            if (pct >= GW_JAMMING_PCT) ghzThreat = THREAT_JAMMING;
-            else if (pct >= GW_SUSPICIOUS_PCT) ghzThreat = THREAT_SUSPICIOUS;
+            // Gap channels active = abnormal (not normal WiFi)
+            // Broadband 70%+ = wall of RF
+            if (gapActive >= 6 || pct >= 80) ghzThreat = THREAT_JAMMING;
+            else if (gapActive >= 3 || pct >= 60) ghzThreat = THREAT_SUSPICIOUS;
             else ghzThreat = THREAT_CLEAR;
         }
         fsFrameReady = false;
     }
 
-    // WiFi threat
+    // WiFi threat — deauth/disassoc/beacon flood detection
     {
         uint32_t attackRate = fsDeauthRate + fsDisassocRate;
-        if (attackRate > fsBaseDeauth + 20) wifiThreat = THREAT_JAMMING;
+        if (attackRate > fsBaseDeauth + 15) wifiThreat = THREAT_JAMMING;
         else if (attackRate > fsBaseDeauth + 5) wifiThreat = THREAT_SUSPICIOUS;
-        else if (fsBeaconRate > fsBaseBeacon * 10) wifiThreat = THREAT_JAMMING;
+        else if (fsBeaconRate > fsBaseBeacon * 8) wifiThreat = THREAT_JAMMING;
         else if (fsBeaconRate > fsBaseBeacon * 3) wifiThreat = THREAT_SUSPICIOUS;
         else wifiThreat = THREAT_CLEAR;
     }
@@ -1786,47 +1938,53 @@ void loop() {
     if (now - lastDraw >= 100) {
         lastDraw = now;
 
-        int y = CONTENT_Y_START + 20;
+        int y = CONTENT_Y_START + 18;
 
-        // Unified threat bar
+        // Unified threat bar (full width gradient)
         drawThreatBar(y, threat, pulseState);
-        y += 18;
+        y += 17;
 
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+        // Gradient separator (teal→hotpink, 2px tall)
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+            tft.drawFastVLine(x, y, 2, tealToHotPink((float)x / SCREEN_WIDTH));
+        }
         y += 4;
 
-        // Per-band indicators
+        // Per-band indicators (bigger dots, threat-colored text)
         drawBandIndicator(y, "WiFi 2.4GHz", wifiThreat);
-        y += 16;
-        drawBandIndicator(y, "SubGHz 300-928", subThreat);
-        y += 16;
-        drawBandIndicator(y, "NRF24 2.4GHz", ghzThreat);
         y += 18;
+        drawBandIndicator(y, "Sub 300-928", subThreat);
+        y += 18;
+        drawBandIndicator(y, "NRF 2.4GHz", ghzThreat);
+        y += 20;
 
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
+        // Gradient separator
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+            tft.drawFastVLine(x, y, 2, tealToHotPink((float)x / SCREEN_WIDTH));
+        }
         y += 4;
 
-        // Mini timelines with labels
-        tft.setTextColor(HALEHOUND_GUNMETAL);
+        // Timelines — magenta labels, 10px tall bars with borders
+        tft.setTextColor(HALEHOUND_MAGENTA);
         tft.setTextSize(1);
-        tft.setCursor(5, y); tft.print("WiFi:");
-        drawMiniTimeline(y + 10, wifiTimeline);
-        y += 20;
-        tft.setCursor(5, y); tft.print("Sub:");
-        drawMiniTimeline(y + 10, subTimeline);
-        y += 20;
-        tft.setCursor(5, y); tft.print("2.4G:");
-        drawMiniTimeline(y + 10, ghzTimeline);
-        y += 20;
-
-        tft.drawFastHLine(0, y, SCREEN_WIDTH, HALEHOUND_HOTPINK);
-        y += 4;
+        tft.fillRect(5, y, 30, 10, TFT_BLACK);
+        tft.setCursor(5, y + 1); tft.print("WiFi");
+        drawMiniTimeline(y + 12, wifiTimeline);
+        y += 24;
+        tft.fillRect(5, y, 30, 10, TFT_BLACK);
+        tft.setCursor(5, y + 1); tft.print("Sub");
+        drawMiniTimeline(y + 12, subTimeline);
+        y += 24;
+        tft.fillRect(5, y, 30, 10, TFT_BLACK);
+        tft.setCursor(5, y + 1); tft.print("2.4G");
+        drawMiniTimeline(y + 12, ghzTimeline);
+        y += 26;
 
         // Skull row
         drawSkullMeter(y, threat);
         y += 20;
 
-        // Stats
+        // Stats line — magenta with rates
         tft.fillRect(5, y, SCREEN_WIDTH - 10, 12, TFT_BLACK);
         tft.setTextColor(HALEHOUND_MAGENTA);
         tft.setCursor(5, y);

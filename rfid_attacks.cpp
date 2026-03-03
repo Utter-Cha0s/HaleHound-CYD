@@ -34,10 +34,13 @@ extern TFT_eSPI tft;
 extern byte pn532_packetbuffer[];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PN532 OBJECT — SPI mode on shared VSPI bus
+// PN532 OBJECT — Software SPI (bit-banged)
+// Hardware SPI LSBFIRST has known issues on ESP32 when sharing bus with
+// MSBFIRST devices (NRF24/CC1101). Software SPI handles LSBFIRST reliably.
+// Speed doesn't matter for RFID card reads — reliability does.
 // ═══════════════════════════════════════════════════════════════════════════
 
-static Adafruit_PN532 nfc(PN532_CS);
+static Adafruit_PN532 nfc(RADIO_SPI_SCK, RADIO_SPI_MISO, RADIO_SPI_MOSI, PN532_CS);
 static bool pn532_detected = false;
 static uint8_t pn532_fw_major = 0;
 static uint8_t pn532_fw_minor = 0;
@@ -242,18 +245,48 @@ bool pn532Init() {
     Serial.println("[PN532] DEMO MODE — no hardware, UI testing only");
     return true;
 #else
-    // Deselect all SPI devices first
+    Serial.println("[PN532] Starting init (software SPI)...");
+
+    // Deselect all hardware SPI devices so their CS pins don't interfere
     spiDeselect();
     delay(10);
 
-    // PN532 library manages its own CS internally via Adafruit_PN532(PN532_CS)
-    // We just need other CS pins HIGH so they don't interfere
-    nfc.begin();
+    // Manual PN532 wakeup — toggle CS to exit low-power mode
+    // Software SPI constructor set PN532_CS as output already, but be safe
+    pinMode(PN532_CS, OUTPUT);
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(PN532_CS, LOW);
+        delay(5);
+        digitalWrite(PN532_CS, HIGH);
+        delay(5);
+    }
     delay(100);
 
-    uint32_t versionData = nfc.getFirmwareVersion();
+    // Library init — software SPI bit-bangs LSBFIRST correctly, no hardware quirks
+    nfc.begin();
+    delay(250);
+
+    // Try getFirmwareVersion with retries
+    uint32_t versionData = 0;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        versionData = nfc.getFirmwareVersion();
+        if (versionData) {
+            Serial.printf("[PN532] Found on attempt %d\n", attempt + 1);
+            break;
+        }
+        Serial.printf("[PN532] Attempt %d failed, retrying...\n", attempt + 1);
+        // Re-wake and retry with increasing delays
+        digitalWrite(PN532_CS, LOW);
+        delay(10);
+        digitalWrite(PN532_CS, HIGH);
+        delay(100 + (attempt * 50));
+    }
+
     if (!versionData) {
-        Serial.println("[PN532] Not found on SPI bus");
+        Serial.println("[PN532] Not found after 5 attempts");
+        Serial.printf("[PN532] Pins: SCK=%d MOSI=%d MISO=%d CS=%d\n",
+                      RADIO_SPI_SCK, RADIO_SPI_MOSI, RADIO_SPI_MISO, PN532_CS);
+        Serial.println("[PN532] Check: DIP CH1=OFF CH2=ON, power cycle after DIP change");
         pn532_detected = false;
         return false;
     }
@@ -274,6 +307,10 @@ void pn532Cleanup() {
     // Deselect PN532, release bus
     spiDeselect();
     pn532_detected = false;
+
+    // Re-init hardware SPI for other radios (NRF24/CC1101)
+    // Software SPI bit-banged GPIO 18/19/23 — need to reclaim for hardware SPI
+    SPI.begin(RADIO_SPI_SCK, RADIO_SPI_MISO, RADIO_SPI_MOSI);
 }
 
 bool pn532IsPresent() {
